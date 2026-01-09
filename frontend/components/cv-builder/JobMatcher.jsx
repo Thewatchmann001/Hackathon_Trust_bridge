@@ -25,7 +25,9 @@ export default function JobMatcher({ cvData }) {
 
     setLoading(true);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000"}/api/cv/match-job", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000";
+      const endpoint = apiUrl + "/api/cv/match-job";
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -58,7 +60,9 @@ export default function JobMatcher({ cvData }) {
 
     setLoading(true);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000"}/api/cv/optimize-for-job", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000";
+      const endpoint = apiUrl + "/api/cv/optimize-for-job";
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -144,10 +148,10 @@ export default function JobMatcher({ cvData }) {
           animate={{ opacity: 1, y: 0 }}
           className="mb-6"
         >
-          <div className={`${getScoreBg(compatibility.compatibility_score)} rounded-lg p-6 mb-4`}>
+          <div className={getScoreBg(compatibility.compatibility_score) + " rounded-lg p-6 mb-4"}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-gray-900">Compatibility Score</h3>
-              <span className={`text-4xl font-bold ${getScoreColor(compatibility.compatibility_score)}`}>
+              <span className={"text-4xl font-bold " + getScoreColor(compatibility.compatibility_score)}>
                 {compatibility.compatibility_score}%
               </span>
             </div>

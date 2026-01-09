@@ -23,7 +23,9 @@ export default function InterviewPrep({ cvData }) {
 
     setLoading(true);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000"}/api/cv/generate-interview-questions", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000";
+      const endpoint = apiUrl + "/api/cv/generate-interview-questions";
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -100,11 +102,12 @@ export default function InterviewPrep({ cvData }) {
               <button
                 key={category}
                 onClick={() => setCurrentCategory(category)}
-                className={`px-4 py-2 font-semibold transition-colors ${
-                  currentCategory === category
+                className={
+                  "px-4 py-2 font-semibold transition-colors " +
+                  (currentCategory === category
                     ? "text-blue-600 border-b-2 border-blue-600"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
+                    : "text-gray-600 hover:text-gray-900")
+                }
               >
                 {category.charAt(0).toUpperCase() + category.slice(1)} ({questions[category]?.length || 0})
               </button>

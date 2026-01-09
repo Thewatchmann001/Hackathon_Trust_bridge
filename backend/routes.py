@@ -15,7 +15,7 @@ backend_dir = Path(__file__).parent
 sys.path.insert(0, str(backend_dir))
 
 from app.db.session import get_db
-from app.db.models import User, Startup, Investment, Job, Employee
+from app.db.models import User, Startup, Investment, Employee
 from app.core.config import settings
 from app.utils.logger import logger
 from sqlalchemy import func, or_, String
@@ -589,16 +589,67 @@ async def match_jobs_endpoint(
     location: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """Match user to relevant job opportunities."""
+    """Match user to relevant job opportunities from integrations (RemoteOK, Freelancer.com) only."""
     try:
-        matches = job_matcher.match_user_to_jobs(
-            user_id=user_id,
-            limit=limit,
-            category=category,
+        # Get user's CV
+        from app.db.models import CV
+        cv = db.query(CV).filter(CV.user_id == user_id).order_by(CV.created_at.desc()).first()
+        
+        if not cv or not cv.json_content:
+            # If no CV, return jobs based on basic user info
+            query = "software engineer"  # Default query
+        else:
+            # Extract skills/keywords from CV for search
+            cv_data = cv.json_content
+            skills = []
+            if cv_data.get("skills"):
+                skills_data = cv_data["skills"]
+                if isinstance(skills_data, dict):
+                    skills.extend(skills_data.get("job_related_skills", []))
+                    skills.extend(skills_data.get("computer_skills", []))
+                elif isinstance(skills_data, list):
+                    skills = [s.get("name", s) if isinstance(s, dict) else s for s in skills_data]
+            
+            query = " ".join(skills[:5]) if skills else "software engineer"
+        
+        # Use global job API to search and match
+        matched_jobs = global_job_api.match_cv_to_global_jobs(
+            cv_data=cv.json_content if cv else {},
+            query=query,
             location=location,
-            db=db
+            limit=limit * 2  # Get more to filter by category
         )
-        return {"matches": matches, "count": len(matches)}
+        
+        # Filter by category if provided (based on job title/description)
+        if category:
+            category_lower = category.lower()
+            matched_jobs = [
+                job for job in matched_jobs
+                if category_lower in job.get("title", "").lower() or 
+                   category_lower in job.get("description", "").lower() or
+                   category_lower in job.get("source", "").lower()
+            ]
+        
+        # Limit results
+        matched_jobs = matched_jobs[:limit]
+        
+        # Format matches similar to old format for compatibility
+        formatted_matches = []
+        for job in matched_jobs:
+            formatted_matches.append({
+                "job_id": None,  # Integration jobs don't have database IDs
+                "job_title": job.get("title", ""),
+                "startup_id": None,
+                "startup_name": job.get("company", ""),
+                "startup_sector": category,
+                "location": job.get("location", ""),
+                "match_score": job.get("match_score", 0.0),
+                "source": job.get("source", "Unknown"),
+                "applyUrl": job.get("applyUrl"),
+                "skills": job.get("skills", []),
+            })
+        
+        return {"matches": formatted_matches, "count": len(formatted_matches)}
     except Exception as e:
         logger.error(f"Error matching jobs: {str(e)}")
         raise HTTPException(
@@ -659,136 +710,52 @@ async def search_jobs_from_cv(
 ):
     """
     Search jobs based on CV keywords and job titles.
-    PRIORITIZES database jobs for fast, reliable results.
-    Optionally includes external APIs if available (non-blocking).
+    Uses ONLY external integrations (RemoteOK, Freelancer.com) - NO database jobs.
     """
     try:
-        logger.info(f"Searching jobs for keywords: {request.keywords}")
+        logger.info(f"Searching jobs for keywords: {request.keywords} (integrations only)")
         
         all_jobs = []
         sources = []
         
-        # PRIORITY 1: Search database FIRST for immediate results
+        # Use JobAggregator to search external integrations only
         try:
-            logger.info("Searching database jobs...")
-            # Build database query
-            query = db.query(Job).join(Startup, Job.startup_id == Startup.id, isouter=True)
+            logger.info("Searching external job platforms (RemoteOK, Freelancer.com)...")
+            aggregator = JobAggregator()
             
-            # Filter by keywords in title or description
-            if request.keywords:
-                keyword_filters = []
-                for keyword in request.keywords[:5]:  # Limit to 5 keywords
-                    # Use JSON functions for SQLite compatibility (works with PostgreSQL too)
-                    # Cast JSON to text for searching
-                    skills_text = func.cast(Job.skills_required, String).ilike(f"%{keyword}%")
-                    keyword_filter = (
-                        Job.title.ilike(f"%{keyword}%") |
-                        Job.description.ilike(f"%{keyword}%") |
-                        skills_text
-                    )
-                    keyword_filters.append(keyword_filter)
-                if keyword_filters:
-                    query = query.filter(or_(*keyword_filters))
-            
-            # Filter by job titles if provided
+            # Search using keywords from request
+            keywords = request.keywords if request.keywords else []
             if request.job_titles:
-                title_filters = []
-                for title in request.job_titles[:3]:  # Limit to 3 titles
-                    title_filters.append(Job.title.ilike(f"%{title}%"))
-                if title_filters:
-                    query = query.filter(or_(*title_filters))
+                keywords.extend(request.job_titles)
             
-            # Filter by location
-            if request.location:
-                query = query.filter(Job.location.ilike(f"%{request.location}%"))
+            # Remove duplicates and limit
+            keywords = list(set(keywords))[:10]
             
-            # Get jobs from database (prioritize database results)
-            db_jobs = query.limit(request.limit).all()
+            integration_jobs = aggregator.search_jobs(
+                keywords=keywords,
+                job_titles=request.job_titles,
+                location=request.location,
+                limit=request.limit
+            )
             
-            logger.info(f"Found {len(db_jobs)} jobs in database")
+            all_jobs.extend(integration_jobs)
             
-            # Convert database jobs to API format
-            for job in db_jobs:
-                company_name = job.company_name
-                if not company_name and job.startup:
-                    company_name = job.startup.name
-                
-                job_dict = {
-                    "title": job.title,
-                    "company": company_name or "Unknown",
-                    "location": job.location,
-                    "description": job.description,
-                    "applyUrl": None,  # Database jobs - can add application endpoint later
-                    "source": "Database",
-                    "posted_date": job.created_at.isoformat() if job.created_at else None,
-                    "skills": job.skills_required or [],
-                    "min_experience": job.min_experience or 0,
-                    "job_id": job.id,  # Include job ID for application tracking
-                }
-                all_jobs.append(job_dict)
+            # Track sources
+            if integration_jobs:
+                unique_sources = set(job.get('source', 'Unknown') for job in integration_jobs)
+                sources.extend(unique_sources)
             
-            if db_jobs:
-                sources.append("Database")
+            logger.info(f"Found {len(integration_jobs)} jobs from integrations: {sources}")
         except Exception as e:
-            logger.error(f"Database job search failed: {str(e)}")
+            logger.error(f"Integration job search failed: {str(e)}")
         
-        # Ensure we return at least some results (even if no matches, return recent jobs)
-        if len(all_jobs) == 0:
-            logger.info("No matching jobs found, returning recent jobs from database")
-            try:
-                recent_jobs = db.query(Job).join(Startup, Job.startup_id == Startup.id, isouter=True).order_by(Job.created_at.desc()).limit(10).all()
-                for job in recent_jobs:
-                    company_name = job.company_name
-                    if not company_name and job.startup:
-                        company_name = job.startup.name
-                    
-                    job_dict = {
-                        "title": job.title,
-                        "company": company_name or "Unknown",
-                        "location": job.location,
-                        "description": job.description,
-                        "applyUrl": None,
-                        "source": "Database (Recent)",
-                        "posted_date": job.created_at.isoformat() if job.created_at else None,
-                        "skills": job.skills_required or [],
-                        "min_experience": job.min_experience or 0,
-                        "job_id": job.id,
-                    }
-                    all_jobs.append(job_dict)
-                if recent_jobs:
-                    sources.append("Database (Recent)")
-            except Exception as e:
-                logger.error(f"Error fetching recent jobs: {str(e)}")
-        
-        # Return database results immediately (don't wait for external APIs)
-        logger.info(f"Returning {len(all_jobs)} jobs from database immediately")
-        result = {
+        # Return integration results
+        logger.info(f"Returning {len(all_jobs)} jobs from integrations")
+        return {
             "jobs": all_jobs[:request.limit],
             "count": len(all_jobs[:request.limit]),
-            "sources": sources if sources else ["Database"]
+            "sources": sources if sources else []
         }
-        
-        # Optionally try external APIs in background (don't wait for response)
-        # This is async and won't block the return
-        if len(all_jobs) < request.limit:
-            try:
-                logger.info("Trying external APIs in background (won't block response)...")
-                # Start external API search in background (fire and forget)
-                import asyncio
-                asyncio.create_task(
-                    asyncio.to_thread(
-                        lambda: job_aggregator.search_jobs(
-                            keywords=request.keywords,
-                            job_titles=request.job_titles,
-                            location=request.location,
-                            limit=min(20, request.limit - len(all_jobs))
-                        )
-                    )
-                )
-            except Exception as e:
-                logger.info(f"External API background search not started: {str(e)}")
-        
-        return result
     except Exception as e:
         logger.error(f"Error searching jobs: {str(e)}")
         raise HTTPException(

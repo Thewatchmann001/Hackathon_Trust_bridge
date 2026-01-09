@@ -22,7 +22,9 @@ export default function CoverLetterGenerator({ cvData }) {
 
     setLoading(true);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000"}/api/cv/generate-cover-letter", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000";
+      const endpoint = apiUrl + "/api/cv/generate-cover-letter";
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -59,7 +61,7 @@ export default function CoverLetterGenerator({ cvData }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `cover-letter-${companyName || "application"}.txt`;
+    a.download = "cover-letter-" + (companyName || "application") + ".txt";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -181,4 +183,3 @@ export default function CoverLetterGenerator({ cvData }) {
     </div>
   );
 }
-

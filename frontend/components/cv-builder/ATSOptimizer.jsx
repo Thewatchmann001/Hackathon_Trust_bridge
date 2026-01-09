@@ -25,7 +25,9 @@ export default function ATSOptimizer({ cvData, onOptimize }) {
 
     setLoading(true);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000"}/api/cv/optimize-ats", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000";
+      const endpoint = apiUrl + "/api/cv/optimize-ats";
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cv_data: cvData }),
@@ -73,7 +75,7 @@ export default function ATSOptimizer({ cvData, onOptimize }) {
           disabled={loading}
           className="btn-secondary flex items-center gap-2"
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          <RefreshCw className={loading ? "w-4 h-4 animate-spin" : "w-4 h-4"} />
           Re-analyze
         </button>
       </div>
@@ -99,24 +101,25 @@ export default function ATSOptimizer({ cvData, onOptimize }) {
                 <p className="text-sm text-gray-600">How well your CV will pass ATS systems</p>
               </div>
               <div className="text-right">
-                <div className={`text-5xl font-bold ${getScoreColor(atsAnalysis.ats_score)}`}>
+                <div className={"text-5xl font-bold " + getScoreColor(atsAnalysis.ats_score)}>
                   {atsAnalysis.ats_score}
                 </div>
-                <div className={`text-2xl font-bold ${getGradeColor(atsAnalysis.grade)}`}>
+                <div className={"text-2xl font-bold " + getGradeColor(atsAnalysis.grade)}>
                   {atsAnalysis.grade}
                 </div>
               </div>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-3">
               <div
-                className={`h-3 rounded-full transition-all ${
-                  atsAnalysis.ats_score >= 80
+                className={
+                  "h-3 rounded-full transition-all " +
+                  (atsAnalysis.ats_score >= 80
                     ? "bg-green-500"
                     : atsAnalysis.ats_score >= 60
                     ? "bg-yellow-500"
-                    : "bg-red-500"
-                }`}
-                style={{ width: `${atsAnalysis.ats_score}%` }}
+                    : "bg-red-500")
+                }
+                style={{ width: atsAnalysis.ats_score + "%" }}
               />
             </div>
           </div>
@@ -164,8 +167,8 @@ export default function ATSOptimizer({ cvData, onOptimize }) {
           )}
 
           {/* No Issues */}
-          {(!atsAnalysis.issues || atsAnalysis.issues.length === 0) &&
-            (!atsAnalysis.suggestions || atsAnalysis.suggestions.length === 0) && (
+          {((!atsAnalysis.issues || atsAnalysis.issues.length === 0) &&
+            (!atsAnalysis.suggestions || atsAnalysis.suggestions.length === 0)) ? (
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
                 <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0" />
                 <div>
@@ -175,7 +178,7 @@ export default function ATSOptimizer({ cvData, onOptimize }) {
                   </p>
                 </div>
               </div>
-            )}
+            ) : null}
         </motion.div>
       )}
     </div>

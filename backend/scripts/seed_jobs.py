@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
 Job Seeding Script
+DEPRECATED: This script is no longer used. Jobs now come from external integrations only (RemoteOK, Freelancer.com).
+Jobs are NOT stored in the database anymore.
 Creates 300-400 diverse jobs in the database for testing and development
 """
 

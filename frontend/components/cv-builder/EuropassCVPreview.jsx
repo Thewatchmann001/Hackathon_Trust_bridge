@@ -52,7 +52,7 @@ export default function EuropassCVPreview({ cvData, onUpdate, onSave }) {
             <textarea
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
-              className={`flex-1 input-field ${className}`}
+              className={"flex-1 input-field " + (className || "")}
               rows={3}
               autoFocus
             />
@@ -61,7 +61,7 @@ export default function EuropassCVPreview({ cvData, onUpdate, onSave }) {
               type={type}
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
-              className={`flex-1 input-field ${className}`}
+              className={"flex-1 input-field " + (className || "")}
               autoFocus
             />
           )}

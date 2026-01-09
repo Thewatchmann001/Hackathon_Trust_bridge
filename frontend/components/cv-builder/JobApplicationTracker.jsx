@@ -248,11 +248,12 @@ export default function JobApplicationTracker({ userId }) {
                         <button
                           key={s}
                           onClick={() => handleUpdateStatus(app.id, s)}
-                          className={`text-xs px-2 py-1 rounded ${
-                            app.status === s
+                          className={
+                            "text-xs px-2 py-1 rounded " +
+                            (app.status === s
                               ? STATUSES[s].color
-                              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                          }`}
+                              : "bg-gray-100 text-gray-600 hover:bg-gray-200")
+                          }
                         >
                           {STATUSES[s].label}
                         </button>

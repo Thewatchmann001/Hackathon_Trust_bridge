@@ -467,11 +467,13 @@ def seed_database():
         
         print(f"✅ Created/Updated {len(startups_data)} startups ({registered_count} registered on-chain)")
         
-        # Create Jobs - Diverse sectors and locations across Sierra Leone
-        print("Creating jobs...")
-        startups = db.query(Startup).all()
-        if startups:
-            jobs_data = [
+        # Create Jobs - DEPRECATED: Jobs now come from external integrations only (RemoteOK, Freelancer.com)
+        # Jobs are NOT stored in the database anymore
+        print("Skipping job creation - jobs now come from external integrations (RemoteOK, Freelancer.com) only")
+        # if False:  # Disabled - jobs from integrations only
+        #     startups = db.query(Startup).all()
+        #     if startups:
+        #         jobs_data = [
                 # Technology Jobs
                 {
                     "startup_id": startups[0].id,  # TechInnovate
@@ -591,12 +593,12 @@ def seed_database():
                 },
             ]
             
-            for job_data in jobs_data:
-                job = Job(**job_data)
-                db.add(job)
-            
-            db.commit()
-            print(f"✅ Created {len(jobs_data)} jobs")
+        #         for job_data in jobs_data:
+        #             job = Job(**job_data)
+        #             db.add(job)
+        #         
+        #         db.commit()
+        #         print(f"✅ Created {len(jobs_data)} jobs")
         
         # Create Investments - Skip mock investments
         # Real investments should be made through the UI which will create proper blockchain transactions

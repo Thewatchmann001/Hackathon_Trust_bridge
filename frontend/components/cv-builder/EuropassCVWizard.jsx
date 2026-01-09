@@ -92,7 +92,8 @@ export default function EuropassCVWizard({ onComplete, onCancel }) {
       if (context.length < 10) return;
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.100.93:8000';
-      const response = await fetch(`${apiUrl}/api/cv/extract-skills`, {
+      const endpoint = apiUrl + "/api/cv/extract-skills";
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -150,7 +151,8 @@ export default function EuropassCVWizard({ onComplete, onCancel }) {
     debounceTimerRef.current[field] = setTimeout(async () => {
       try {
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.100.93:8000';
-        const response = await fetch(`${apiUrl}/api/cv/field-suggestions`, {
+        const endpoint = apiUrl + "/api/cv/field-suggestions";
+        const response = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -255,7 +257,8 @@ export default function EuropassCVWizard({ onComplete, onCancel }) {
       let generatedCvData = null;
       try {
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.100.93:8000';
-        const generateResponse = await fetch(`${apiUrl}/api/cv/generate-from-questions`, {
+        const generateEndpoint = apiUrl + "/api/cv/generate-from-questions";
+        const generateResponse = await fetch(generateEndpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(wizardAnswers),
@@ -285,7 +288,8 @@ export default function EuropassCVWizard({ onComplete, onCancel }) {
         photoFormData.append("user_id", user.id.toString());
         
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.100.93:8000';
-        const photoResponse = await fetch(`${apiUrl}/api/cv/upload-photo`, {
+        const photoEndpoint = apiUrl + "/api/cv/upload-photo";
+        const photoResponse = await fetch(photoEndpoint, {
           method: "POST",
           body: photoFormData,
         });
@@ -298,7 +302,8 @@ export default function EuropassCVWizard({ onComplete, onCancel }) {
 
       // Save to database
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://192.168.100.93:8000';
-      const saveResponse = await fetch(`${apiUrl}/api/cv/save`, {
+      const saveEndpoint = apiUrl + "/api/cv/save";
+      const saveResponse = await fetch(saveEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1210,13 +1215,14 @@ export default function EuropassCVWizard({ onComplete, onCancel }) {
               <div key={step.id} className="flex items-center flex-1">
                 <div className="flex flex-col items-center flex-1">
                   <div
-                    className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
-                      isActive
+                    className={
+                      "w-12 h-12 rounded-full flex items-center justify-center transition-all " +
+                      (isActive
                         ? "bg-blue-600 text-white shadow-lg"
                         : isCompleted
                         ? "bg-green-500 text-white"
-                        : "bg-gray-200 text-gray-600"
-                    }`}
+                        : "bg-gray-200 text-gray-600")
+                    }
                   >
                     {isCompleted ? (
                       <Check className="w-6 h-6" />
@@ -1230,9 +1236,10 @@ export default function EuropassCVWizard({ onComplete, onCancel }) {
                 </div>
                 {idx < STEPS.length - 1 && (
                   <div
-                    className={`h-1 flex-1 mx-2 ${
-                      isCompleted ? "bg-green-500" : "bg-gray-200"
-                    }`}
+                    className={
+                      "h-1 flex-1 mx-2 " +
+                      (isCompleted ? "bg-green-500" : "bg-gray-200")
+                    }
                   />
                 )}
               </div>

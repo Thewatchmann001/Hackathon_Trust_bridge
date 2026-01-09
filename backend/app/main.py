@@ -9,11 +9,14 @@ from pathlib import Path as PathLib
 backend_dir = PathLib(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
+from fastapi import Request, status
+from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.utils.logger import logger
 from app.api import users  # Keep users for authentication
 from app.api import messages  # Chat/messaging API
 from app.api.websocket import manager
+from app.core.exceptions import InvalidCredentials, UserNotFound, TrustBridgeException
 from routes import router as main_router  # New consolidated routes
 
 # Removed: certificates, startups (old), jobs (old), cv (old), investments (old)
@@ -52,6 +55,34 @@ app.include_router(main_router)  # New consolidated routes for CV and Investment
 static_dir = Path(settings.UPLOAD_DIR).parent
 static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+# Exception handlers
+@app.exception_handler(InvalidCredentials)
+async def invalid_credentials_handler(request: Request, exc: InvalidCredentials):
+    """Handle invalid credentials exceptions."""
+    return JSONResponse(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        content={"detail": "Invalid email or password"}
+    )
+
+
+@app.exception_handler(UserNotFound)
+async def user_not_found_handler(request: Request, exc: UserNotFound):
+    """Handle user not found exceptions."""
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={"detail": f"User not found: {str(exc)}"}
+    )
+
+
+@app.exception_handler(TrustBridgeException)
+async def trustbridge_exception_handler(request: Request, exc: TrustBridgeException):
+    """Handle general TrustBridge exceptions."""
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={"detail": str(exc)}
+    )
 
 
 @app.get("/")

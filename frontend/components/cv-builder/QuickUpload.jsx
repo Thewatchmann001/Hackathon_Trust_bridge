@@ -70,7 +70,9 @@ export default function QuickUpload({ onComplete, onCancel }) {
       formData.append("pdf_file", file);
       formData.append("user_id", user.id.toString());
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000"}/api/cv/upload-linkedin-pdf", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000";
+      const endpoint = apiUrl + "/api/cv/upload-linkedin-pdf";
+      const response = await fetch(endpoint, {
         method: "POST",
         body: formData,
       });
@@ -158,13 +160,14 @@ export default function QuickUpload({ onComplete, onCancel }) {
                       <h4 className="font-medium text-gray-900 flex-1">{job.title}</h4>
                       {/* Source Badge with distinct colors */}
                       {job.source && (
-                        <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                          job.source === 'RemoteOK' 
+                        <span className={
+                          "text-xs font-semibold px-2.5 py-1 rounded-full " +
+                          (job.source === 'RemoteOK' 
                             ? 'bg-green-100 text-green-700' 
                             : job.source === 'Freelancer.com'
                             ? 'bg-purple-100 text-purple-700'
-                            : 'bg-blue-100 text-blue-700'
-                        }`}>
+                            : 'bg-blue-100 text-blue-700')
+                        }>
                           {job.source}
                         </span>
                       )}
@@ -241,11 +244,12 @@ export default function QuickUpload({ onComplete, onCancel }) {
 
         {/* Drag and Drop Zone */}
         <div
-          className={`border-2 border-dashed rounded-lg p-12 text-center transition-all ${
-            dragActive
+          className={
+            "border-2 border-dashed rounded-lg p-12 text-center transition-all " +
+            (dragActive
               ? "border-blue-500 bg-blue-50"
-              : "border-gray-300 hover:border-blue-400 hover:bg-gray-50"
-          }`}
+              : "border-gray-300 hover:border-blue-400 hover:bg-gray-50")
+          }
           onDragEnter={handleDrag}
           onDragLeave={handleDrag}
           onDragOver={handleDrag}
