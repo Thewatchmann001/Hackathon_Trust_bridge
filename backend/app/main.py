@@ -16,6 +16,7 @@ from app.utils.logger import logger
 from app.api import users  # Keep users for authentication
 from app.api import messages  # Chat/messaging API
 from app.api import auth  # OAuth authentication
+from app.api.payments import router as payments_router
 from app.api.websocket import manager
 from app.core.exceptions import InvalidCredentials, UserNotFound, TrustBridgeException
 from app.core.middleware import RateLimitMiddleware, CSRFProtectionMiddleware
@@ -35,14 +36,16 @@ app = FastAPI(
 
 # CORS middleware
 # Note: When allow_credentials=True, cannot use wildcard "*" for allow_origins
-# Must explicitly list allowed origins
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://0.0.0.0:3000",
+]
+if getattr(settings, "CORS_ORIGINS", None):
+    origins.extend(x.strip() for x in settings.CORS_ORIGINS.split(",") if x.strip())
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://0.0.0.0:3000",
-    ],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,6 +59,7 @@ app.add_middleware(RateLimitMiddleware)
 app.include_router(users.router)  # Keep for authentication
 app.include_router(auth.router)  # OAuth authentication (Google, etc.)
 app.include_router(messages.router)  # Chat/messaging
+app.include_router(payments_router)
 app.include_router(main_router)  # New consolidated routes for CV and Investments
 
 # Mount static files for photo uploads

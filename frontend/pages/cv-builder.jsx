@@ -10,6 +10,7 @@ import CVEditor from "../cv-builder/CVEditor";
 import CVSuggestions from "../cv-builder/CVSuggestions";
 import JobList from "../components/JobList";
 import EuropassCVWizard from "../components/cv-builder/EuropassCVWizard";
+import GuidedCVWizard from "../components/cv-builder/GuidedCVWizard";
 import JobMatcher from "../components/cv-builder/JobMatcher";
 import CoverLetterGenerator from "../components/cv-builder/CoverLetterGenerator";
 import InterviewPrep from "../components/cv-builder/InterviewPrep";
@@ -357,9 +358,8 @@ export default function CVBuilderPage() {
 
       case "wizard":
         return (
-          <EuropassCVWizard
+          <GuidedCVWizard
             onComplete={handleWizardComplete}
-            key="europass-cv-wizard-stable"
             onCancel={() => {
               if (hasCV) {
                 setActiveTab("editor");
@@ -369,6 +369,7 @@ export default function CVBuilderPage() {
                 });
               }
             }}
+            userId={user?.id}
           />
         );
 

@@ -1,0 +1,22 @@
+# Dependencies and local env
+venv
+.venv
+.env
+.env.*
+*.pyc
+__pycache__
+.pytest_cache
+.coverage
+htmlcov
+*.egg-info
+.eggs
+
+# Git / IDE
+.git
+.gitignore
+.cursor
+*.md
+
+# Optional
+node_modules
+blockchain

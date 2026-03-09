@@ -31,6 +31,42 @@ export default function InvestorPlatformPage() {
     }
   }, [user]);
 
+  // After Stripe Checkout success redirect: confirm session and record investment
+  useEffect(() => {
+    const { payment, session_id } = router.query;
+    if (payment !== "success" || !session_id || !user?.id) return;
+    const confirm = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+        const res = await fetch(`${apiUrl}/api/payments/confirm-session`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token && { Authorization: `Bearer ${token}` }),
+          },
+          body: JSON.stringify({ session_id }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          toast.success(
+            `Investment recorded! $${data.amount} invested.`,
+            { duration: 4000 }
+          );
+          fetchPortfolio();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          toast.error(err.detail || "Could not confirm payment");
+        }
+      } catch (e) {
+        toast.error("Could not confirm payment");
+      } finally {
+        router.replace("/investor-platform", undefined, { scroll: false });
+      }
+    };
+    confirm();
+  }, [router.query.payment, router.query.session_id, user?.id]);
+
   const fetchPortfolio = async () => {
     if (!user?.id) return;
     try {

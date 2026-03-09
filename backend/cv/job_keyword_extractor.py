@@ -8,6 +8,7 @@ between quick upload and CV editor job matching.
 from typing import Dict, List, Any, Optional, Tuple
 import re
 from app.utils.logger import logger
+from cv.utils import safe_lower
 
 
 class JobKeywordExtractor:
@@ -81,7 +82,7 @@ class JobKeywordExtractor:
                     raw_keywords.append(job_title_str)
                     
                     # Check if it matches Tier 1
-                    jt_lower = job_title_str.lower()
+                    jt_lower = safe_lower(job_title_str)
                     for role in self.TIER_1_ROLE_KEYWORDS:
                         if role in jt_lower:
                             tier_1_roles.append(role)
@@ -99,7 +100,7 @@ class JobKeywordExtractor:
             
             if isinstance(skill_lists, list):
                 for skill in skill_lists:
-                    skill_str = str(skill).lower().strip()
+                    skill_str = safe_lower(skill).strip()
                     raw_keywords.append(skill_str)
                     
                     # Check if matches Tier 2

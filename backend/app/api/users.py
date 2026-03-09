@@ -14,6 +14,7 @@ from app.utils.validation import (
     validate_email, validate_password_strength, validate_role,
     PASSWORD_MIN_LENGTH
 )
+from app.services.user_capabilities import get_user_capabilities, user_has_capability
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -78,6 +79,10 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     user_id: int
     role: str
+    # Unified account
+    active_role: Optional[str] = None
+    capabilities: Optional[dict] = None
+    user: Optional[dict] = None  # Full user object for frontend (optional)
 
 
 class UserResponse(BaseModel):
@@ -91,6 +96,9 @@ class UserResponse(BaseModel):
     verified_on_chain: Optional[str] = "pending"
     created_at: Optional[str] = None
     access_token: Optional[str] = None  # Included for Privy sync and login responses
+    # Unified account: capabilities and active role
+    capabilities: Optional[dict] = None
+    active_role: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -105,6 +113,11 @@ class PrivyUserSync(BaseModel):
     role: Optional[UserRole] = None
     university: Optional[str] = None
     company_name: Optional[str] = None
+
+
+class SwitchRoleRequest(BaseModel):
+    """Request body for switching active role (unified accounts)."""
+    role: str  # "student" | "founder" | "investor"
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -264,16 +277,15 @@ async def login_user(credentials: UserLogin, db: Session = Depends(get_db)):
             detail="Invalid email or password"
         )
     
-    # ROLE-BASED AUTHENTICATION: Validate selected role matches user's role
+    # ROLE-BASED AUTHENTICATION (unified account): role no longer required to match.
+    # User can log in and switch role later. Token carries primary role and active_role.
+    active_role = user.role.value
     if credentials.role:
         selected_role = credentials.role.value if isinstance(credentials.role, UserRole) else credentials.role
         user_role = user.role.value if isinstance(user.role, UserRole) else user.role
-        
-        if selected_role != user_role:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"You are not authorized to sign in as {selected_role}. Your role is {user_role}."
-            )
+        # If they selected a role and it matches a capability, use it as active_role
+        if selected_role == user_role or user_has_capability(db, user, selected_role):
+            active_role = selected_role
     
     # Reset failed login attempts on successful login
     user.failed_login_attempts = 0
@@ -281,23 +293,28 @@ async def login_user(credentials: UserLogin, db: Session = Depends(get_db)):
     user.last_login = datetime.utcnow()
     db.commit()
     
-    # Create access token with role
+    # Create access token with role and active_role (unified account)
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={
             "sub": str(user.id),
             "email": user.email,
-            "role": user.role.value
+            "role": user.role.value,
+            "active_role": active_role,
         },
         expires_delta=access_token_expires
     )
     
-    logger.info(f"User logged in: {user.id}, role: {user.role.value}")
+    capabilities = get_user_capabilities(db, user)
+    
+    logger.info(f"User logged in: {user.id}, role: {user.role.value}, active_role: {active_role}")
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user_id": user.id,
-        "role": user.role.value
+        "role": user.role.value,
+        "active_role": active_role,
+        "capabilities": capabilities,
     }
 
 
@@ -318,38 +335,14 @@ async def sync_privy_user(privy_data: PrivyUserSync, db: Session = Depends(get_d
     user = db.query(User).filter(User.email == privy_data.email).first()
     
     if user:
-        # ROLE ENFORCEMENT: Existing user's role is authoritative
-        # If a different role is requested, reject or use existing role
-        if privy_data.role and privy_data.role != user.role:
-            # Normalize role names for comparison
-            def normalize_role(r):
-                if r == UserRole.FOUNDER or r == UserRole.STARTUP:
-                    return 'startup'
-                if r == UserRole.JOB_SEEKER or r == UserRole.STUDENT:
-                    return 'student'
-                return r.value if hasattr(r, 'value') else str(r)
-            
-            existing_normalized = normalize_role(user.role)
-            requested_normalized = normalize_role(privy_data.role)
-            
-            if existing_normalized != requested_normalized:
-                # Map role values to user-friendly names
-                role_display_names = {
-                    'founder': 'Startup',
-                    'startup': 'Startup',
-                    'student': 'Job Seeker',
-                    'investor': 'Investor'
-                }
-                existing_display = role_display_names.get(user.role.value, user.role.value)
-                requested_display = role_display_names.get(privy_data.role.value if hasattr(privy_data.role, 'value') else str(privy_data.role), str(privy_data.role))
-                
-                logger.warning(
-                    f"Role mismatch for user {user.id}: existing={user.role.value}, requested={privy_data.role}"
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"This email is registered as {existing_display}. Please select '{existing_display}' from the role dropdown to sign in, or use a different email address."
-                )
+        # UNIFIED ACCOUNT: Existing user can sign in with any role they have capability for.
+        # Use their primary role if requested role doesn't match or isn't provided.
+        active_role = user.role.value
+        if privy_data.role:
+            requested = privy_data.role.value if hasattr(privy_data.role, 'value') else str(privy_data.role)
+            if user_has_capability(db, user, requested):
+                active_role = requested
+            # If they requested a role they don't have, keep primary (no 403)
         
         # Update existing user with Privy data (but keep existing role)
         if privy_data.full_name:
@@ -367,7 +360,15 @@ async def sync_privy_user(privy_data: PrivyUserSync, db: Session = Depends(get_d
         
         db.commit()
         db.refresh(user)
-        logger.info(f"Updated existing user from Privy: {user.id} (role: {user.role.value})")
+        logger.info(f"Updated existing user from Privy: {user.id} (role: {user.role.value}, active_role: {active_role})")
+        
+        capabilities = get_user_capabilities(db, user)
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": str(user.id), "email": user.email, "role": user.role.value, "active_role": active_role},
+            expires_delta=access_token_expires
+        )
+        return _user_to_response(user, access_token=access_token, capabilities=capabilities, active_role=active_role)
     else:
         # Create new user from Privy
         # Default role to investor if not provided
@@ -413,11 +414,18 @@ async def sync_privy_user(privy_data: PrivyUserSync, db: Session = Depends(get_d
     # Create JWT token for backend API access
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": str(user.id), "email": user.email, "role": user.role.value},
+        data={"sub": str(user.id), "email": user.email, "role": user.role.value, "active_role": user.role.value},
         expires_delta=access_token_expires
     )
     
-    return {
+    capabilities = get_user_capabilities(db, user)
+    
+    return _user_to_response(user, access_token=access_token, capabilities=capabilities, active_role=user.role.value)
+
+
+def _user_to_response(user: User, access_token: Optional[str] = None, capabilities: Optional[dict] = None, active_role: Optional[str] = None) -> dict:
+    """Build UserResponse dict with optional token, capabilities, active_role."""
+    out = {
         "id": user.id,
         "full_name": user.full_name,
         "email": user.email,
@@ -427,7 +435,68 @@ async def sync_privy_user(privy_data: PrivyUserSync, db: Session = Depends(get_d
         "company_name": user.company_name or "",
         "verified_on_chain": user.verified_on_chain or "pending",
         "created_at": user.created_at.isoformat() if user.created_at else None,
-        "access_token": access_token,  # Include token in response
+    }
+    if access_token is not None:
+        out["access_token"] = access_token
+    if capabilities is not None:
+        out["capabilities"] = capabilities
+    if active_role is not None:
+        out["active_role"] = active_role
+    return out
+
+
+@router.get("/me/capabilities")
+async def get_my_capabilities(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get current user's role capabilities (unified account)."""
+    return get_user_capabilities(db, current_user)
+
+
+@router.post("/me/switch-role", response_model=TokenResponse)
+async def switch_role(
+    body: SwitchRoleRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Switch active role (unified account). Returns new token with active_role set.
+    """
+    role = (body.role or "").strip().lower()
+    if role not in ("student", "founder", "investor"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="role must be one of: student, founder, investor",
+        )
+    if not user_has_capability(db, current_user, role):
+        if role == "founder":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have a registered startup yet. Register a startup to switch to Founder role.",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Role '{role}' is not available for your account.",
+        )
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={
+            "sub": str(current_user.id),
+            "email": current_user.email,
+            "role": current_user.role.value,
+            "active_role": role,
+        },
+        expires_delta=access_token_expires,
+    )
+    caps = get_user_capabilities(db, current_user)
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user_id": current_user.id,
+        "role": current_user.role.value,
+        "active_role": role,
+        "capabilities": caps,
     }
 
 

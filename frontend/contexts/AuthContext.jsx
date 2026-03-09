@@ -110,17 +110,16 @@ export const AuthProvider = ({ children }) => {
             hasToken: !!backendUser.access_token 
           });
 
-          // Store token and user
+          // Store token and user (unified account: capabilities + active_role)
           if (backendUser.access_token) {
             if (typeof window !== 'undefined') {
               localStorage.setItem('token', backendUser.access_token);
               localStorage.setItem('user', JSON.stringify(backendUser));
-              // Clear role selection once synced
               localStorage.removeItem(PENDING_ROLE_STORAGE_KEY);
             }
             setToken(backendUser.access_token);
             setUser(backendUser);
-            console.log('✅ Token and user stored, should trigger redirect');
+            console.log('✅ Token and user stored (active_role:', backendUser.active_role, ', capabilities:', backendUser.capabilities?.allowed_roles, ')');
           } else {
             console.error('❌ No access_token in backend response');
           }
@@ -258,19 +257,39 @@ export const AuthProvider = ({ children }) => {
   }, [privyAuth?.authenticated, token, user, syncFailed, authError]);
 
   useEffect(() => {
-    // Check for stored token on mount (for non-Privy users)
     if (typeof window !== 'undefined' && !privyAuth?.authenticated) {
       const storedToken = localStorage.getItem('token');
       const storedUser = localStorage.getItem('user');
       if (storedToken && storedUser) {
         setToken(storedToken);
-        setUser(JSON.parse(storedUser));
+        try {
+          const parsed = JSON.parse(storedUser);
+          setUser(parsed);
+        } catch {
+          setUser(null);
+        }
       }
     }
     if (!privyAuth?.authenticated) {
-    setLoading(false);
+      setLoading(false);
     }
   }, [privyAuth?.authenticated]);
+
+  // Fetch capabilities when user exists but has no capabilities (e.g. after refresh with old stored user)
+  useEffect(() => {
+    if (!token || !user?.id) return;
+    if (user.capabilities?.allowed_roles?.length) return;
+    authAPI.getCapabilities()
+      .then((res) => {
+        const caps = res.data;
+        const updated = { ...user, capabilities: caps, active_role: user.active_role || user.role };
+        setUser(updated);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('user', JSON.stringify(updated));
+        }
+      })
+      .catch(() => {});
+  }, [token, user?.id]);
 
   // Helper function to extract error message from API response
   const extractErrorMessage = (error) => {
@@ -293,34 +312,30 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password, role = null) => {
     try {
-      // Role-based login: include role in request if provided
       const loginData = { email, password };
-      if (role) {
-        loginData.role = role;
-      }
+      if (role) loginData.role = role;
       const response = await authAPI.login(loginData);
-      const { access_token, user_id, role: userRole } = response.data;
-      
-      // Store token and user info
+      const data = response.data;
+      const { access_token, user_id, role: userRole, active_role, capabilities } = data;
+
       if (typeof window !== 'undefined') {
         localStorage.setItem('token', access_token);
-        localStorage.setItem('user', JSON.stringify({ id: user_id, role: userRole }));
+        const userPayload = { id: user_id, role: userRole, active_role: active_role || userRole, capabilities: capabilities || {} };
+        localStorage.setItem('user', JSON.stringify(userPayload));
       }
-      
+
       setToken(access_token);
-      setUser({ id: user_id, role: userRole });
-      
-      // Fetch full user data
+      setUser({ id: user_id, role: userRole, active_role: active_role || userRole, capabilities: capabilities || {} });
+
       const userData = await authAPI.getUser(user_id);
-      const fullUser = userData.data;
+      const fullUser = { ...userData.data, active_role: active_role || userRole, capabilities: capabilities || {} };
       setUser(fullUser);
-      
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('user', JSON.stringify(fullUser));
+      }
       return { success: true, user: fullUser };
     } catch (error) {
-      return { 
-        success: false, 
-        error: extractErrorMessage(error)
-      };
+      return { success: false, error: extractErrorMessage(error) };
     }
   };
 
@@ -417,6 +432,39 @@ export const AuthProvider = ({ children }) => {
     router.push('/');
   };
 
+  const switchRole = async (role) => {
+    if (!token || !user) return { success: false, error: 'Not authenticated' };
+    try {
+      const res = await authAPI.switchRole(role);
+      const data = res.data;
+      const newToken = data.access_token;
+      const activeRole = data.active_role || role;
+      const capabilities = data.capabilities || user.capabilities || {};
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('token', newToken);
+        localStorage.setItem('user', JSON.stringify({ ...user, active_role: activeRole, capabilities }));
+      }
+      setToken(newToken);
+      setUser({ ...user, active_role: activeRole, capabilities });
+      return { success: true, active_role: activeRole };
+    } catch (error) {
+      return { success: false, error: extractErrorMessage(error) };
+    }
+  };
+
+  const refetchCapabilities = async () => {
+    if (!token) return;
+    try {
+      const res = await authAPI.getCapabilities();
+      const caps = res.data;
+      const updated = { ...user, capabilities: caps };
+      setUser(updated);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('user', JSON.stringify(updated));
+      }
+    } catch (_) {}
+  };
+
   const value = {
     user,
     token,
@@ -424,10 +472,14 @@ export const AuthProvider = ({ children }) => {
     login,
     register,
     logout,
+    switchRole,
+    refetchCapabilities,
     isAuthenticated: !!token,
-    authError, // Expose auth error for UI display
-    syncFailed, // Expose sync failed state
-    clearAuthError: () => setAuthError(null), // Allow clearing error explicitly
+    capabilities: user?.capabilities || null,
+    activeRole: user?.active_role || user?.role || null,
+    authError,
+    syncFailed,
+    clearAuthError: () => setAuthError(null),
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

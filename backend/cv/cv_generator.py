@@ -755,7 +755,7 @@ class CVGenerator:
                     story.append(Paragraph(edu_text, styles['Normal']))
                     story.append(Spacer(1, 0.1*inch))
             
-            # Skills
+            # Skills - display without duplication, matching preview style
             skills = (
                 cv_data.get("skills")
                 or cv_data.get("personal_skills")
@@ -765,18 +765,51 @@ class CVGenerator:
             )
             if skills:
                 story.append(Paragraph("Skills", heading_style))
-                skills_text = []
-                if isinstance(skills, dict):
-                    for category, skill_list in skills.items():
-                        if isinstance(skill_list, list):
-                            skills_text.append(f"{category}: {', '.join(skill_list)}")
-                        else:
-                            skills_text.append(f"{category}: {skill_list}")
-                else:
-                    skills_text.append(str(skills))
                 
-                if skills_text:
-                    story.append(Paragraph(" | ".join(skills_text), styles['Normal']))
+                if isinstance(skills, dict):
+                    # Collect all unique skills to avoid duplication
+                    all_skills = set()
+                    skill_categories = []
+                    
+                    # Priority order: technical > tools > soft > languages
+                    # Add technical skills first
+                    tech_skills = skills.get("job_related_skills", []) or skills.get("technical_skills", []) or skills.get("technical", [])
+                    if tech_skills:
+                        all_skills.update(tech_skills)
+                        skill_categories.append(("Technical Skills", tech_skills))
+                    
+                    # Add tool/programming skills (only if not already in technical)
+                    tool_skills = skills.get("computer_skills", []) or skills.get("programming_skills", [])
+                    if tool_skills:
+                        # Filter out duplicates
+                        unique_tools = [s for s in tool_skills if s not in all_skills]
+                        if unique_tools:
+                            all_skills.update(unique_tools)
+                            skill_categories.append(("Tools & Technologies", unique_tools))
+                    
+                    # Add soft skills (only if not already added)
+                    soft_skills = skills.get("soft", []) or skills.get("social_skills", [])
+                    if soft_skills:
+                        unique_soft = [s for s in soft_skills if s not in all_skills]
+                        if unique_soft:
+                            all_skills.update(unique_soft)
+                            skill_categories.append(("Soft Skills", unique_soft))
+                    
+                    # Add languages if any
+                    languages = skills.get("languages", [])
+                    if languages:
+                        unique_langs = [s for s in languages if s not in all_skills]
+                        if unique_langs:
+                            skill_categories.append(("Languages", unique_langs))
+                    
+                    # Display each category on a separate line for better readability
+                    if skill_categories:
+                        for category_name, skill_list in skill_categories:
+                            if skill_list:
+                                story.append(Paragraph(f"<b>{category_name}:</b> {', '.join(skill_list)}", styles['Normal']))
+                        story.append(Spacer(1, 0.1*inch))
+                else:
+                    story.append(Paragraph(str(skills), styles['Normal']))
                     story.append(Spacer(1, 0.1*inch))
             
             # Build PDF
@@ -935,31 +968,47 @@ class CVGenerator:
             if skills:
                 doc.add_heading('SKILLS & COMPETENCIES', level=1)
                 if isinstance(skills, dict):
-                    # Handle different skill formats
-                    job_skills = skills.get("job_related_skills", []) or skills.get("technical_skills", []) or skills.get("technical", [])
-                    computer_skills = skills.get("computer_skills", []) or skills.get("programming_skills", [])
-                    soft_skills = skills.get("soft", []) or skills.get("social_skills", [])
-                    languages = skills.get("languages", [])
+                    # Collect all unique skills to avoid duplication
+                    all_skills = set()
                     
+                    # Priority order: technical > tools > soft > languages
+                    # Add technical skills first
+                    job_skills = skills.get("job_related_skills", []) or skills.get("technical_skills", []) or skills.get("technical", [])
                     if job_skills:
+                        all_skills.update(job_skills)
                         p = doc.add_paragraph()
                         p.add_run("Technical Skills: ").bold = True
                         p.add_run(", ".join(job_skills))
                     
+                    # Add tool/programming skills (only if not already in technical)
+                    computer_skills = skills.get("computer_skills", []) or skills.get("programming_skills", [])
                     if computer_skills:
-                        p = doc.add_paragraph()
-                        p.add_run("Programming & Tools: ").bold = True
-                        p.add_run(", ".join(computer_skills))
+                        # Filter out duplicates
+                        unique_tools = [s for s in computer_skills if s not in all_skills]
+                        if unique_tools:
+                            all_skills.update(unique_tools)
+                            p = doc.add_paragraph()
+                            p.add_run("Tools & Technologies: ").bold = True
+                            p.add_run(", ".join(unique_tools))
                     
+                    # Add soft skills (only if not already added)
+                    soft_skills = skills.get("soft", []) or skills.get("social_skills", [])
                     if soft_skills:
-                        p = doc.add_paragraph()
-                        p.add_run("Soft Skills: ").bold = True
-                        p.add_run(", ".join(soft_skills))
+                        unique_soft = [s for s in soft_skills if s not in all_skills]
+                        if unique_soft:
+                            all_skills.update(unique_soft)
+                            p = doc.add_paragraph()
+                            p.add_run("Soft Skills: ").bold = True
+                            p.add_run(", ".join(unique_soft))
                     
+                    # Add languages if any
+                    languages = skills.get("languages", [])
                     if languages:
-                        p = doc.add_paragraph()
-                        p.add_run("Languages: ").bold = True
-                        p.add_run(", ".join(languages))
+                        unique_langs = [s for s in languages if s not in all_skills]
+                        if unique_langs:
+                            p = doc.add_paragraph()
+                            p.add_run("Languages: ").bold = True
+                            p.add_run(", ".join(unique_langs))
                 else:
                     doc.add_paragraph(str(skills))
             

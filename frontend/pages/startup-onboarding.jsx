@@ -29,7 +29,7 @@ const INDUSTRIES = [
 
 export default function StartupOnboarding() {
   const router = useRouter();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, refetchCapabilities } = useAuth();
   const [solanaAddress, setSolanaAddress] = useState(
     user?.wallet_address || ""
   );
@@ -247,6 +247,7 @@ export default function StartupOnboarding() {
 
       if (response.ok) {
         const data = await response.json();
+        await refetchCapabilities?.();
         if (data.already_exists) {
           toast.success("Redirecting to your startup dashboard...");
           router.push("/startup-dashboard");

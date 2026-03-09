@@ -10,6 +10,7 @@ STAGE 1: Domain Filtering (STRICT)
 from typing import List, Dict, Any, Set, Optional
 from app.utils.logger import logger
 from cv.domain_extractor import DomainExtractor
+from cv.utils import safe_lower
 
 
 class DomainFilter:
@@ -52,7 +53,27 @@ class DomainFilter:
             
             # Extract skills to check for tech indicators
             skills = self.domain_extractor._extract_skills(cv_data)
-            skills_text = " ".join(skills).lower()
+            skills_text = safe_lower(" ".join(skills))
+            
+            # Also check job titles/experience for tech indicators (more lenient)
+            experience_text = ""
+            if isinstance(cv_data.get("experience"), list):
+                for exp in cv_data.get("experience", []):
+                    if isinstance(exp, dict):
+                        experience_text += " " + safe_lower(str(exp.get("job_title", "")))
+                        experience_text += " " + safe_lower(str(exp.get("description", "")))
+            
+            # Check projects section too
+            projects_text = ""
+            if isinstance(cv_data.get("projects"), list):
+                for proj in cv_data.get("projects", []):
+                    if isinstance(proj, dict):
+                        projects_text += " " + safe_lower(str(proj.get("title", "")))
+                        projects_text += " " + safe_lower(str(proj.get("description", "")))
+                        tech = proj.get("technologies") or proj.get("tech_stack") or ""
+                        if isinstance(tech, list):
+                            tech = " ".join(str(t) for t in tech)
+                        projects_text += " " + safe_lower(str(tech))
             
             # Tech skills that clearly indicate technology domain
             tech_indicators = [
@@ -61,18 +82,30 @@ class DomainFilter:
                 "database", "sql", "postgresql", "mongodb", "api", "rest", "graphql",
                 "blockchain", "web3", "ai", "ml", "machine learning", "artificial intelligence",
                 "docker", "kubernetes", "aws", "azure", "cloud", "git", "github", "gitlab",
-                "flask", "django", "fastapi", "tensorflow", "pytorch", "data science"
+                "flask", "django", "fastapi", "tensorflow", "pytorch", "data science",
+                "tableau", "data analysis", "networking", "linux", "ubuntu"
             ]
             
-            # Count tech indicators in skills
-            tech_match_count = sum(1 for indicator in tech_indicators if indicator in skills_text)
+            # Combine skills, experience, and projects for tech detection
+            combined_text = skills_text + " " + experience_text + " " + projects_text
+            tech_match_count = sum(1 for indicator in tech_indicators if indicator in combined_text)
             
-            if tech_match_count >= 3:  # If 3+ tech skills found, assume technology domain
-                logger.info(f"Tech skills fallback: Found {tech_match_count} tech indicators - assuming technology domain")
+            # Also check for tech-related terms that indicate technology domain
+            tech_related_terms = [
+                "data", "database", "sql", "analysis", "programming", "coding", 
+                "engineer", "developer", "software", "system", "application", "app",
+                "computer", "technical", "tech", "it", "information technology"
+            ]
+            has_tech_related = any(term in combined_text for term in tech_related_terms)
+            
+            # Lower threshold: 2+ tech indicators OR 1+ with tech-related terms
+            # This is more lenient for CVs with valid tech skills but fewer exact matches
+            if tech_match_count >= 2 or (tech_match_count >= 1 and has_tech_related):
+                logger.info(f"Tech skills fallback: Found {tech_match_count} tech indicators (has_tech_related={has_tech_related}) - assuming technology domain")
                 cv_domains = {"technology"}
             else:
                 # Not enough tech skills - reject all jobs
-                logger.warning(f"Tech skills fallback: Only {tech_match_count} tech indicators found - REJECTING all jobs (hard gate)")
+                logger.warning(f"Tech skills fallback: Only {tech_match_count} tech indicators found (has_tech_related={has_tech_related}) - REJECTING all jobs (hard gate)")
                 return [], jobs  # Return empty matched, all excluded
         
         matched_jobs = []
@@ -123,10 +156,10 @@ class DomainFilter:
         if not cv_domains:
             return None
         
-        job_text = " ".join([
+        job_text = safe_lower(" ".join([
             str(job.get("title", "")),
             str(job.get("description", ""))
-        ]).lower()
+        ]))
         
         # Find matching domain
         for domain in cv_domains:

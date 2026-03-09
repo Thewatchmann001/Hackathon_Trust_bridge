@@ -27,6 +27,9 @@ export const authAPI = {
   login: (data) => api.post('/api/users/login', data),
   getUser: (userId) => api.get(`/api/users/${userId}`),
   syncPrivy: (data) => api.post('/api/users/privy/sync', data), // Sync Privy user with backend
+  // Unified account: capabilities and role switching
+  getCapabilities: () => api.get('/api/users/me/capabilities'),
+  switchRole: (role) => api.post('/api/users/me/switch-role', { role }),
   // OAuth
   initiateGoogleOAuth: (role = null) => {
     // Use the same API_BASE_URL as the axios instance
@@ -61,6 +64,13 @@ export const investmentAPI = {
   // New endpoints
   sendUSDC: (data) => api.post('/api/investments/usdc/send', data),
   getPortfolio: (investorId) => api.get(`/api/investments/portfolio/${investorId}`),
+};
+
+export const paymentsAPI = {
+  createCheckoutSession: (data) =>
+    api.post('/api/payments/create-checkout-session', data),
+  confirmSession: (sessionId) =>
+    api.post('/api/payments/confirm-session', { session_id: sessionId }),
 };
 
 export default api;
@@ -116,5 +126,7 @@ export const cvAPI = {
     api.post('/api/cv/suggestions', { section, content, industry }),
   searchJobs: (keywords, jobTitles = null, location = null, limit = 50, userId = null) =>
     api.post('/api/cv/jobs', { keywords, job_titles: jobTitles, location, limit, user_id: userId }),
+  matchJobsV2: (userId, cvId = null, keywords = null, location = null, limit = 50) =>
+    api.post('/api/cv/match-jobs-v2', { user_id: userId, cv_id: cvId, keywords, location, limit }),
 };
 

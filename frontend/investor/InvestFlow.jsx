@@ -10,8 +10,10 @@ import {
   ExternalLink,
   Copy,
   Check,
+  CreditCard,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { paymentsAPI } from "../lib/api";
 import {
   Connection,
   PublicKey,
@@ -37,6 +39,7 @@ const PRIVY_ENABLED =
 export default function InvestFlow({ startupId, investorId, onSuccess }) {
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
+  const [cardLoading, setCardLoading] = useState(false);
   const [step, setStep] = useState(1); // 1: Amount, 2: Confirm, 3: Success
   const [transactionData, setTransactionData] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -72,6 +75,41 @@ export default function InvestFlow({ startupId, investorId, onSuccess }) {
     signTransaction,
     sendTransaction,
   ]);
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    toast.success("Transaction signature copied!");
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handlePayWithCard = async () => {
+    if (!amount || parseFloat(amount) <= 0) {
+      toast.error("Please enter a valid amount (min 1 USD)");
+      return;
+    }
+    if (!investorId || !startupId) {
+      toast.error("Missing investor or startup information");
+      return;
+    }
+    try {
+      setCardLoading(true);
+      const { data } = await paymentsAPI.createCheckoutSession({
+        startup_id: startupId,
+        amount_usd: parseFloat(amount),
+      });
+      if (data?.url) {
+        window.location.href = data.url;
+        return;
+      }
+      toast.error("Could not start payment");
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || "Payment failed";
+      toast.error(typeof msg === "string" ? msg : "Payment failed");
+    } finally {
+      setCardLoading(false);
+    }
+  };
 
   const handleInvest = async () => {
     if (!amount || parseFloat(amount) <= 0) {
@@ -409,13 +447,6 @@ export default function InvestFlow({ startupId, investorId, onSuccess }) {
     }
   };
 
-  const copyToClipboard = (text) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    toast.success("Transaction signature copied!");
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   const getExplorerUrl = (txSignature) => {
     if (!txSignature || txSignature.startsWith("mock_")) return null;
     return `https://explorer.solana.com/tx/${txSignature}?cluster=devnet`;
@@ -594,6 +625,9 @@ export default function InvestFlow({ startupId, investorId, onSuccess }) {
         <p className="text-xs text-gray-500 mt-1">
           Zero fees, zero currency risk. Powered by Solana stablecoins.
         </p>
+        <p className="text-xs text-slate-500 mt-1">
+          Or pay with card (Stripe) — no wallet required.
+        </p>
       </div>
 
       {step === 2 && (
@@ -609,15 +643,26 @@ export default function InvestFlow({ startupId, investorId, onSuccess }) {
         </div>
       )}
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap">
         {step === 1 ? (
-          <button
-            onClick={() => setStep(2)}
-            className="btn-primary flex-1"
-            disabled={!connected || !amount || parseFloat(amount) <= 0}
-          >
-            {!connected ? "Connect Wallet First" : "Continue"}
-          </button>
+          <>
+            <button
+              onClick={() => setStep(2)}
+              className="btn-primary flex-1"
+              disabled={!connected || !amount || parseFloat(amount) <= 0}
+            >
+              {!connected ? "Connect Wallet First" : "Continue"}
+            </button>
+            <button
+              type="button"
+              onClick={handlePayWithCard}
+              disabled={!amount || parseFloat(amount) < 1 || cardLoading}
+              className="btn-secondary flex-1 inline-flex items-center justify-center gap-2"
+            >
+              <CreditCard className="w-4 h-4" />
+              {cardLoading ? "Redirecting..." : "Pay with card"}
+            </button>
+          </>
         ) : (
           <>
             <button onClick={() => setStep(1)} className="btn-secondary">

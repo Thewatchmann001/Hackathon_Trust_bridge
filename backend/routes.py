@@ -38,6 +38,8 @@ from app.services.credibility_service import CredibilityService
 from app.blockchain.startup_client import StartupClient
 from app.services.attestation import AttestationService
 from app.services.proposal_service import ProposalService
+from app.services.cv_wizard_service import CVWizardService
+from cv.new_job_matcher import NewJobMatcher
 from app.db.models import Attestation
 
 router = APIRouter()
@@ -55,6 +57,9 @@ receipt_generator = ReceiptGenerator()
 advanced_cv_service = AdvancedCVService()
 attestation_service = AttestationService()
 proposal_service = ProposalService()
+cv_wizard_service = CVWizardService()
+new_job_matcher = NewJobMatcher()
+new_job_matcher = NewJobMatcher()
 
 
 # ==================== CV BUILDER ENDPOINTS ====================
@@ -182,7 +187,7 @@ async def generate_cv_endpoint(
                         timeout_seconds=15,
                         fallback=[],
                         keywords=primary_keywords,
-                        limit=100,
+                        limit=200,  # Increased from 100 to 200 for more job variety
                         platform_keywords=platform_keywords,
                         cv_data=normalized_cv_for_filtering
                     )
@@ -208,7 +213,7 @@ async def generate_cv_endpoint(
                     
                     interleaved = []
                     max_per_source = max(len(jobs) for jobs in jobs_by_source.values()) if jobs_by_source else 0
-                    interleave_limit = min(100, len(unique_jobs))
+                    interleave_limit = min(200, len(unique_jobs))  # Increased from 100 to 200
                     
                     for i in range(max_per_source):
                         if len(interleaved) >= interleave_limit:
@@ -847,16 +852,45 @@ async def optimize_ats_endpoint(request: Dict[str, Any], db: Session = Depends(g
                 if cv and cv.json_content:
                     # Use ORIGINAL CV data (same as job search) - not optimized_cv
                     if isinstance(cv.json_content, dict):
+                        # Log all top-level keys for debugging
+                        logger.info(f"CV json_content top-level keys: {list(cv.json_content.keys())[:20]}...")
+                        
                         if cv.json_content.get("original_cv_data"):
                             cv_data = cv.json_content.get("original_cv_data")
-                            logger.info(f"Using original_cv_data from database for user {user_id}")
+                            logger.info(f"Using original_cv_data from database for user {user_id} (TRUE original from upload)")
+                            # Log what sections are present for debugging
+                            logger.info(f"original_cv_data sections: experience={bool(cv_data.get('experience'))}, projects={bool(cv_data.get('projects'))}, summary={bool(cv_data.get('summary'))}")
                         else:
                             # Strip ATS metadata to get canonical content
-                            cv_data = {k: v for k, v in cv.json_content.items() 
+                            # Also exclude original_cv to avoid using previously optimized versions
+                            stripped_data = {k: v for k, v in cv.json_content.items() 
                                       if k not in ["ats_score", "ats_grade", "ats_metadata", "ats_analysis",
                                                   "ats_issues", "ats_recommendations", "ats_optimized_content",
-                                                  "ats_changes", "optimized_cv", "is_optimized"]}
-                            logger.info(f"Using json_content (stripped) from database for user {user_id}")
+                                                  "ats_changes", "optimized_cv", "is_optimized", "original_cv",
+                                                  "changes", "optimization_metadata", "strengths_analysis", 
+                                                  "highlighted_summary", "ai_score", "stored_job_matches",
+                                                  "cv_domain", "parsed_skills", "job_search", "job_match_keywords"]}
+                            
+                            # Check if stripped data has actual CV content (not just metadata)
+                            has_cv_content = (
+                                bool(stripped_data.get("experience")) or 
+                                bool(stripped_data.get("work_experience")) or
+                                bool(stripped_data.get("summary")) or
+                                bool(stripped_data.get("projects")) or
+                                bool(stripped_data.get("education"))
+                            )
+                            
+                            if has_cv_content:
+                                cv_data = stripped_data
+                                logger.info(f"Using json_content (stripped) from database for user {user_id} - has CV content")
+                            else:
+                                # If stripped version has no CV content, try to use the full json_content
+                                # This handles cases where original_cv_data wasn't stored but CV data is at top level
+                                cv_data = cv.json_content
+                                logger.warning(f"Stripped version has no CV content, using full json_content for user {user_id}")
+                            
+                            # Log what sections are present for debugging
+                            logger.info(f"json_content sections: experience={bool(cv_data.get('experience'))}, projects={bool(cv_data.get('projects'))}, summary={bool(cv_data.get('summary'))}")
                         stored_hash = cv.json_content.get("cv_hash")
                         logger.info(f"Using CV from database for user {user_id}, hash={stored_hash[:16] if stored_hash else 'None'}...")
                     else:
@@ -873,21 +907,65 @@ async def optimize_ats_endpoint(request: Dict[str, Any], db: Session = Depends(g
         ats_engine = ATSEngine()
         pdf_parser = PDFParserService()
         
-        # Remove old ATS metadata to get canonical CV content
-        fresh_cv_data = {k: v for k, v in cv_data.items() 
-                        if k not in ["ats_score", "ats_grade", "ats_metadata", "ats_analysis", 
-                                    "ats_issues", "ats_recommendations", "ats_optimized_content",
-                                    "ats_changes", "created_at", "updated_at", "ats_optimized_at"]}
-        
-        # CRITICAL FIX: Check if CV data is nested under 'original_cv' key
-        # This happens when CV comes from optimization results
-        if fresh_cv_data.get("original_cv") and isinstance(fresh_cv_data.get("original_cv"), dict):
-            logger.info("optimize-ats: Found 'original_cv' key, using that instead")
-            original_cv = fresh_cv_data.get("original_cv")
-            # Merge original_cv with top-level data (original_cv takes precedence)
-            fresh_cv_data = {**fresh_cv_data, **original_cv}
-            # Remove the nested original_cv key
-            fresh_cv_data.pop("original_cv", None)
+        # CRITICAL FIX: Check for original_cv_data FIRST (from upload), then original_cv, then optimized_cv
+        # Priority: original_cv_data > optimized_cv > original_cv
+        # original_cv_data is the TRUE original from upload
+        # optimized_cv might have better content than original_cv (if original_cv was weakened)
+        # original_cv might be a previously optimized/weakened version
+        # Check BEFORE stripping metadata, as original_cv_data might be nested
+        if cv_data.get("original_cv_data") and isinstance(cv_data.get("original_cv_data"), dict):
+            logger.info("optimize-ats: Found 'original_cv_data' key in cv_data, using TRUE original from upload")
+            fresh_cv_data = cv_data.get("original_cv_data")
+            # fresh_cv_data is now the original CV, no need to strip metadata
+        elif cv_data.get("optimized_cv") and isinstance(cv_data.get("optimized_cv"), dict):
+            # Check if optimized_cv has better content (more complete) than original_cv
+            optimized_cv = cv_data.get("optimized_cv")
+            original_cv = cv_data.get("original_cv")
+            
+            # Compare content completeness
+            optimized_has_content = (
+                bool(optimized_cv.get("experience")) or bool(optimized_cv.get("work_experience")) or
+                bool(optimized_cv.get("summary")) or bool(optimized_cv.get("projects"))
+            )
+            original_has_content = (
+                original_cv and isinstance(original_cv, dict) and (
+                    bool(original_cv.get("experience")) or bool(original_cv.get("work_experience")) or
+                    bool(original_cv.get("summary")) or bool(original_cv.get("projects"))
+                )
+            )
+            
+            if optimized_has_content and (not original_has_content or len(str(optimized_cv)) > len(str(original_cv or {}))):
+                logger.info("optimize-ats: Using 'optimized_cv' (has better/more complete content than original_cv)")
+                fresh_cv_data = optimized_cv
+            elif original_cv and isinstance(original_cv, dict):
+                logger.info("optimize-ats: Using 'original_cv' (optimized_cv not better)")
+                fresh_cv_data = original_cv
+            else:
+                logger.info("optimize-ats: Using 'optimized_cv' (original_cv not available)")
+                fresh_cv_data = optimized_cv
+        elif cv_data.get("original_cv") and isinstance(cv_data.get("original_cv"), dict):
+            logger.info("optimize-ats: Found 'original_cv' key in cv_data (may be previously optimized), using that as fallback")
+            fresh_cv_data = cv_data.get("original_cv")
+        else:
+            # Remove old ATS metadata to get canonical CV content
+            fresh_cv_data = {k: v for k, v in cv_data.items() 
+                            if k not in ["ats_score", "ats_grade", "ats_metadata", "ats_analysis", 
+                                        "ats_issues", "ats_recommendations", "ats_optimized_content",
+                                        "ats_changes", "created_at", "updated_at", "ats_optimized_at",
+                                        "changes", "optimization_metadata", "strengths_analysis", 
+                                        "highlighted_summary", "ai_score", "stored_job_matches",
+                                        "cv_domain", "parsed_skills", "job_search", "job_match_keywords"]}
+            
+            # If we still don't have CV content, check if original_cv_data is nested in the stripped data
+            if fresh_cv_data.get("original_cv_data") and isinstance(fresh_cv_data.get("original_cv_data"), dict):
+                logger.info("optimize-ats: Found 'original_cv_data' key after stripping, using TRUE original from upload")
+                fresh_cv_data = fresh_cv_data.get("original_cv_data")
+            elif fresh_cv_data.get("optimized_cv") and isinstance(fresh_cv_data.get("optimized_cv"), dict):
+                logger.info("optimize-ats: Found 'optimized_cv' key after stripping, using that")
+                fresh_cv_data = fresh_cv_data.get("optimized_cv")
+            elif fresh_cv_data.get("original_cv") and isinstance(fresh_cv_data.get("original_cv"), dict):
+                logger.info("optimize-ats: Found 'original_cv' key after stripping (may be previously optimized), using that as fallback")
+                fresh_cv_data = fresh_cv_data.get("original_cv")
         
         # DEBUG: Log before validation
         logger.info(f"optimize-ats: Before validation - experience count: {len(fresh_cv_data.get('experience', []) or fresh_cv_data.get('work_experience', []) or [])}")
@@ -1286,6 +1364,212 @@ async def get_field_suggestions(request: Dict[str, Any]):
         )
 
 
+# ==================== CV WIZARD ENDPOINTS ====================
+
+@router.post("/api/cv/wizard/step/{step_number}")
+async def process_wizard_step(
+    step_number: int,
+    request: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """Process a single wizard step."""
+    try:
+        step_data = request.get("data", {})
+        previous_data = request.get("previous_data", {})
+        
+        result = cv_wizard_service.process_wizard_step(step_number, step_data, previous_data)
+        return result
+    except Exception as e:
+        logger.error(f"Error processing wizard step {step_number}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process step: {str(e)}"
+        )
+
+
+@router.post("/api/cv/wizard/skills/recommend")
+async def recommend_skills(request: Dict[str, Any]):
+    """Get skill recommendations based on field of study and experience."""
+    try:
+        field_of_study = request.get("field_of_study", "")
+        experience = request.get("experience", [])
+        industry = request.get("industry", "")
+        selected_skills = request.get("selected_skills", [])
+        
+        from app.services.skill_recommender import SkillRecommender
+        recommender = SkillRecommender()
+        
+        result = recommender.get_all_recommended_skills(
+            field_of_study,
+            experience,
+            selected_skills
+        )
+        
+        return {
+            "success": True,
+            "recommended_skills": result
+        }
+    except Exception as e:
+        logger.error(f"Error recommending skills: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to recommend skills: {str(e)}"
+        )
+
+
+@router.post("/api/cv/wizard/experience/enhance")
+async def enhance_experience(request: Dict[str, Any]):
+    """Enhance experience description with AI."""
+    try:
+        job_title = request.get("job_title", "")
+        company = request.get("company", "")
+        description = request.get("description", "")
+        industry = request.get("industry")
+        
+        from app.services.experience_enhancer import ExperienceEnhancer
+        enhancer = ExperienceEnhancer()
+        
+        enhanced_bullets = enhancer.enhance_experience_description(
+            job_title, company, description, industry
+        )
+        
+        return {
+            "success": True,
+            "enhanced_bullets": enhanced_bullets
+        }
+    except Exception as e:
+        logger.error(f"Error enhancing experience: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to enhance experience: {str(e)}"
+        )
+
+
+@router.post("/api/cv/wizard/summary/generate")
+async def generate_summary(request: Dict[str, Any]):
+    """Generate professional summary."""
+    try:
+        basic_info = request.get("basic_info", {})
+        education = request.get("education", [])
+        experience = request.get("experience", [])
+        skills = request.get("skills", {})
+        industry = request.get("industry")
+        
+        from app.services.summary_generator import SummaryGenerator
+        generator = SummaryGenerator()
+        
+        summary = generator.generate_summary(
+            basic_info, education, experience, skills, industry
+        )
+        
+        variations = generator.generate_summary_variations(
+            basic_info, education, experience, skills, industry, count=3
+        )
+        
+        return {
+            "success": True,
+            "summary": summary,
+            "variations": variations
+        }
+    except Exception as e:
+        logger.error(f"Error generating summary: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate summary: {str(e)}"
+        )
+
+
+@router.post("/api/cv/wizard/complete")
+async def complete_wizard(
+    request: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """Complete wizard and save final CV."""
+    try:
+        user_id = request.get("user_id")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="user_id is required"
+            )
+        
+        all_steps_data = request.get("steps", {})
+        
+        # Generate final CV
+        result = cv_wizard_service.generate_final_cv(all_steps_data, user_id, db)
+        
+        return {
+            "success": True,
+            "cv_id": result.get("id"),
+            "cv_data": result
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error completing wizard: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to complete wizard: {str(e)}"
+        )
+
+
+# ==================== NEW JOB MATCHING SYSTEM ====================
+
+@router.post("/api/cv/match-jobs-v2")
+async def match_jobs_v2(
+    request: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """
+    New job matching endpoint using redesigned system.
+    Features:
+    - Modular job providers (RemoteOK, Arbeitnow, Freelancer, Adzuna, YC, Internships)
+    - Hybrid matching (embeddings + keywords + skills + experience)
+    - CV caching for fast repeated matches
+    - Fallback logic to never return zero jobs
+    - Comprehensive logging and metrics
+    """
+    try:
+        user_id = request.get("user_id")
+        cv_id = request.get("cv_id")
+        keywords = request.get("keywords")
+        location = request.get("location")
+        limit = request.get("limit", 50)
+        
+        # Get CV ID from user_id if not provided
+        if not cv_id and user_id:
+            from app.db.models import CV
+            cv = db.query(CV).filter(CV.user_id == user_id).order_by(CV.created_at.desc()).first()
+            if cv:
+                cv_id = cv.id
+        
+        if not cv_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="cv_id or user_id is required"
+            )
+        
+        # Use new job matcher
+        result = await new_job_matcher.match_cv_to_jobs(
+            cv_id=cv_id,
+            keywords=keywords,
+            location=location,
+            limit=limit,
+            db=db
+        )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in new job matching: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to match jobs: {str(e)}"
+        )
+
+
 @router.post("/api/cv/upload-linkedin-pdf")
 async def upload_linkedin_pdf(
     pdf_file: UploadFile = File(...),
@@ -1555,7 +1839,7 @@ async def upload_linkedin_pdf(
                 timeout_seconds=15,
                 fallback=[],
                 keywords=primary_keywords,
-                limit=100,  # Increased from 30 to 100 for more job variety
+                limit=200,  # Increased from 100 to 200 for more job variety
                 platform_keywords=platform_keywords,
                 cv_data=normalized_cv_for_filtering  # Use normalized CV data for domain filtering
             )
@@ -1589,8 +1873,8 @@ async def upload_linkedin_pdf(
             logger.info(f"Job aggregation: {dict((k, len(v)) for k, v in jobs_by_source.items())}")
             logger.info(f"Max jobs per source: {max_per_source}, Total unique jobs before interleaving: {len(unique_jobs)}")
 
-            # Increased limit to match new job search limit (100)
-            interleave_limit = min(100, len(unique_jobs))  # Use actual limit or available jobs
+            # Increased limit to match new job search limit (200)
+            interleave_limit = min(200, len(unique_jobs))  # Use actual limit or available jobs
 
             # Interleave jobs round-robin style from each source
             for i in range(max_per_source):
@@ -1611,7 +1895,7 @@ async def upload_linkedin_pdf(
                             added_job_keys.add(job_key)
 
             # If we still have space and more jobs, add remaining from all sources
-            # Increased limit to match new job search limit (100)
+            # Increased limit to match new job search limit (200)
             if len(interleaved) < interleave_limit:
                 for job in unique_jobs:
                     if len(interleaved) >= interleave_limit:
@@ -1641,10 +1925,17 @@ async def upload_linkedin_pdf(
         # STEP 4: Update CV in database with job matches and PDF URL (ATS omitted on quick upload)
         from app.db.models import CV
         saved_cv = db.query(CV).filter(CV.id == result.get("id")).first()
-        if saved_cv and saved_cv.json_content:
-            # Remove ATS fields on quick upload to avoid confusing early scores
-            for key in ["ats_score", "ats_grade", "ats_metadata", "cv_hash", "original_cv_hash"]:
-                saved_cv.json_content.pop(key, None)
+        if saved_cv:
+            # CRITICAL: Assign improved_cv_data (with original_cv_data) to json_content FIRST
+            # This ensures original_cv_data is stored in the database
+            if improved_cv_data:
+                saved_cv.json_content = improved_cv_data.copy()
+                logger.info(f"[QUICK UPLOAD] Assigned improved_cv_data to saved_cv.json_content, original_cv_data present: {'original_cv_data' in saved_cv.json_content}")
+            
+            if saved_cv.json_content:
+                # Remove ATS fields on quick upload to avoid confusing early scores
+                for key in ["ats_score", "ats_grade", "ats_metadata", "cv_hash", "original_cv_hash"]:
+                    saved_cv.json_content.pop(key, None)
             # Store job search context for consistency across flows
             # CRITICAL: Ensure job_matches is a list (not None)
             if job_matches is None:
@@ -1731,6 +2022,89 @@ async def upload_linkedin_pdf(
         elif "skills" in improved_cv_data and "personal_skills" not in improved_cv_data:
             improved_cv_data["personal_skills"] = improved_cv_data["skills"]
         
+        # Calculate ATS score for the uploaded CV (even on quick upload)
+        # This ensures users see their ATS score immediately
+        calculated_ats_score = None
+        calculated_ats_grade = None
+        try:
+            from cv.ats_engine import ATSEngine
+            from app.services.pdf_parser_service import PDFParserService
+            
+            pdf_parser = PDFParserService()
+            normalized_cv_for_ats = pdf_parser.validate_cv_data(improved_cv_data.copy())
+            
+            ats_engine = ATSEngine()
+            ats_result = ats_engine.calculate_ats_score(normalized_cv_for_ats, force_recompute=True)
+            calculated_ats_score = ats_result.get("ats_score", 0)
+            calculated_ats_grade = ats_result.get("ats_grade", "D")
+            
+            logger.info(f"[QUICK UPLOAD] Calculated ATS score: {calculated_ats_score}/100 (Grade: {calculated_ats_grade})")
+        except Exception as ats_error:
+            logger.warning(f"[QUICK UPLOAD] Failed to calculate ATS score: {str(ats_error)}", exc_info=True)
+            # Continue without ATS score - don't fail the upload
+        
+        # Add missing skills and learning resources to job matches
+        try:
+            from cv.ats_engine import ATSEngine
+            from cv.matching.learning_resources import LearningResourcesService
+            from app.services.pdf_parser_service import PDFParserService
+            
+            pdf_parser = PDFParserService()
+            normalized_cv_for_skills = pdf_parser.validate_cv_data(improved_cv_data.copy())
+            ats_engine = ATSEngine()
+            cv_skills_raw = ats_engine._extract_all_cv_skills(normalized_cv_for_skills)
+            cv_skills = [str(s).lower().strip() for s in cv_skills_raw if s]
+            learning_service = LearningResourcesService()
+            
+            for job in job_matches:
+                try:
+                    job_skills_raw = job.get("skills", [])
+                    job_skills = []
+                    
+                    # Normalize job skills
+                    if isinstance(job_skills_raw, list):
+                        for item in job_skills_raw:
+                            if item:
+                                if isinstance(item, str):
+                                    job_skills.append(item.lower().strip())
+                                elif isinstance(item, list):
+                                    job_skills.extend([str(s).lower().strip() for s in item if s])
+                                else:
+                                    job_skills.append(str(item).lower().strip())
+                    elif isinstance(job_skills_raw, str):
+                        job_skills = [s.lower().strip() for s in job_skills_raw.split(",") if s.strip()]
+                    
+                    # Calculate missing skills
+                    missing_skills = []
+                    for skill in job_skills:
+                        if not any(skill in cv_skill or cv_skill in skill for cv_skill in cv_skills):
+                            missing_skills.append(skill)
+                    
+                    if missing_skills:
+                        job["ats_missing_skills"] = missing_skills[:5]
+                        
+                        # Add learning resources
+                        skill_gaps_with_resources = []
+                        for skill in missing_skills[:3]:
+                            resources = learning_service.get_resources_for_skill(skill, limit=2)
+                            skill_gaps_with_resources.append({
+                                "skill": skill,
+                                "resources": resources
+                            })
+                        job["skill_gaps"] = skill_gaps_with_resources
+                    else:
+                        job["ats_missing_skills"] = []
+                        job["skill_gaps"] = []
+                except Exception as job_error:
+                    logger.warning(f"Failed to add missing skills/resources to job '{job.get('title', 'Unknown')}': {str(job_error)}")
+                    job["ats_missing_skills"] = []
+                    job["skill_gaps"] = []
+            
+            logger.info(f"[QUICK UPLOAD] Added missing skills and learning resources to {len(job_matches)} jobs")
+        except Exception as skills_error:
+            logger.warning(f"[QUICK UPLOAD] Failed to add missing skills/resources: {str(skills_error)}", exc_info=True)
+            # Continue without skills - jobs still returned
+        
         return {
             "success": True,
             "message": "CV processed and improved successfully",
@@ -1738,9 +2112,8 @@ async def upload_linkedin_pdf(
             "cv_id": result.get("id"),
             "job_matches": job_matches,
             "match_count": len(job_matches),
-            # ATS score intentionally omitted on quick upload; shown only in optimizer flow
-            "ats_score": None,
-            "ats_grade": None,
+            "ats_score": calculated_ats_score,  # Now included on quick upload
+            "ats_grade": calculated_ats_grade,  # Now included on quick upload
             "pdf_url": pdf_url,  # Include PDF URL in response
             "improvements": {
                 "ats_optimized": False,
@@ -1968,7 +2341,7 @@ class JobSearchRequest(BaseModel):
     keywords: List[str] = []  # Default to empty list instead of required
     job_titles: Optional[List[str]] = None
     location: Optional[str] = None
-    limit: int = 100  # Increased from 50 to 100 for more job variety
+    limit: int = 200  # Increased from 100 to 200 for more job variety
     user_id: Optional[int] = None  # Optional user_id to retrieve stored job matches
 
 
@@ -2059,51 +2432,90 @@ async def search_jobs_from_cv(
                                 generic_ats_result = ats_engine.calculate_ats_score(normalized_cv, force_recompute=False)
                                 generic_ats_score = generic_ats_result.get("ats_score", 0)
                                 
-                                # Add job-specific ATS scores to each job
+                                # Calculate missing skills for each job (ATS score display removed per user request)
                                 for job in return_jobs:
                                     try:
-                                        job_context = {
-                                            "job_title": job.get("title", ""),
-                                            "job_description": job.get("description", ""),
-                                            "job_skills": job.get("skills", []) if isinstance(job.get("skills"), list) else []
-                                        }
+                                        # Don't set ATS score - user doesn't want it displayed
+                                        # job["ats_score"] = None  # Explicitly set to None
+                                        # job["ats_grade"] = None
                                         
-                                        # Calculate job-specific ATS score
-                                        job_ats_result = ats_engine.calculate_ats_score(
-                                            normalized_cv,
-                                            stored_hash=generic_ats_result.get("cv_hash"),
-                                            force_recompute=False,
-                                            job_context=job_context
-                                        )
+                                        # Calculate missing skills manually
+                                        job_skills_raw = job.get("skills", [])
+                                        job_skills = []
                                         
-                                        # Add ATS data to job
-                                        missing_skills = []
-                                        if job_ats_result.get("job_specific_score") is not None:
-                                            job["ats_score"] = job_ats_result.get("job_specific_score")
-                                            job["ats_grade"] = job_ats_result.get("ats_grade", "D")
-                                            job["ats_relevance"] = job_ats_result.get("job_relevance_factor", 0)
-                                            job["ats_keyword_overlap"] = job_ats_result.get("keyword_overlap", 0)
-                                            job["ats_keyword_overlap_percentage"] = job_ats_result.get("keyword_overlap_percentage", 0)
-                                            missing_skills = job_ats_result.get("missing_skills", [])[:5]  # Top 5
-                                            job["ats_missing_skills"] = missing_skills
-                                            job["ats_matched_keywords"] = job_ats_result.get("matched_job_keywords", [])[:10]  # Top 10
+                                        # Normalize job skills - handle all formats
+                                        if isinstance(job_skills_raw, list):
+                                            for item in job_skills_raw:
+                                                if item:
+                                                    if isinstance(item, str):
+                                                        job_skills.append(item)
+                                                    elif isinstance(item, list):
+                                                        job_skills.extend([str(s) for s in item if s])
+                                                    else:
+                                                        job_skills.append(str(item))
+                                        elif isinstance(job_skills_raw, str):
+                                            job_skills = [s.strip() for s in job_skills_raw.split(",") if s.strip()]
+                                        
+                                        # Calculate missing skills
+                                        if job_skills:
+                                            try:
+                                                from cv.ats_engine import ATSEngine
+                                                temp_engine = ATSEngine()
+                                                cv_skills_raw = temp_engine._extract_all_cv_skills(normalized_cv)
+                                                
+                                                # Normalize CV skills - handle lists
+                                                cv_skills = []
+                                                for skill in cv_skills_raw:
+                                                    if isinstance(skill, str):
+                                                        cv_skills.append(skill)
+                                                    elif isinstance(skill, list):
+                                                        cv_skills.extend([str(s) for s in skill if s])
+                                                    else:
+                                                        cv_skills.append(str(skill))
+                                                
+                                                cv_skills_lower = [str(s).lower().strip() for s in cv_skills if s]
+                                                
+                                                missing_skills = []
+                                                for skill in job_skills:
+                                                    if isinstance(skill, str):
+                                                        skill_lower = skill.lower().strip()
+                                                        if not any(skill_lower in cv_skill or cv_skill in skill_lower for cv_skill in cv_skills_lower):
+                                                            missing_skills.append(skill)
+                                                
+                                                if missing_skills:
+                                                    job["ats_missing_skills"] = missing_skills[:5]
+                                                    logger.info(f"[MISSING SKILLS] Job '{job.get('title', 'Unknown')}': Found {len(missing_skills)} missing skills")
+                                                    
+                                                    # Add learning resources for missing skills
+                                                    try:
+                                                        from cv.matching.learning_resources import LearningResourcesService
+                                                        learning_service = LearningResourcesService()
+                                                        skill_gaps_with_resources = []
+                                                        for skill in missing_skills[:3]:  # Limit to top 3 missing skills
+                                                            resources = learning_service.get_resources_for_skill(skill, limit=2)
+                                                            skill_gaps_with_resources.append({
+                                                                "skill": skill,
+                                                                "resources": resources
+                                                            })
+                                                        job["skill_gaps"] = skill_gaps_with_resources
+                                                        logger.info(f"[LEARNING RESOURCES] Added resources for {len(skill_gaps_with_resources)} skills for job '{job.get('title', 'Unknown')}'")
+                                                    except Exception as resource_error:
+                                                        logger.warning(f"Failed to add learning resources: {str(resource_error)}", exc_info=True)
+                                                        job["skill_gaps"] = []
+                                                else:
+                                                    job["ats_missing_skills"] = []
+                                                    job["skill_gaps"] = []
+                                            except Exception as skill_error:
+                                                logger.warning(f"Failed to calculate missing skills: {str(skill_error)}", exc_info=True)
+                                                job["ats_missing_skills"] = []
+                                                job["skill_gaps"] = []
                                         else:
-                                            # Fallback to generic ATS score
-                                            job["ats_score"] = generic_ats_score
-                                            job["ats_grade"] = generic_ats_result.get("ats_grade", "D")
-                                            job["ats_relevance"] = None
-                                            # Try to get missing skills from generic result
-                                            missing_skills = generic_ats_result.get("missing_skills", [])[:5]
-                                            if missing_skills:
-                                                job["ats_missing_skills"] = missing_skills
-                                        
-                                        # DISABLED: Learning resources feature removed
-                                        job["skill_gaps"] = []
+                                            job["ats_missing_skills"] = []
+                                            job["skill_gaps"] = []
                                     except Exception as e:
-                                        logger.warning(f"Failed to calculate ATS score for job '{job.get('title', 'Unknown')}': {str(e)}")
-                                        # Fallback to generic
-                                        job["ats_score"] = generic_ats_score
-                                        job["ats_grade"] = generic_ats_result.get("ats_grade", "D")
+                                        logger.warning(f"Failed to process job '{job.get('title', 'Unknown')}': {str(e)}", exc_info=True)
+                                        job["ats_missing_skills"] = []
+                                        job["skill_gaps"] = []
                                 
                                 logger.info(f"[JOB ATS SCORING] Added job-specific ATS scores to {len(return_jobs)} jobs")
                         except Exception as e:
@@ -2167,7 +2579,7 @@ async def search_jobs_from_cv(
                                 timeout_seconds=15,
                                 fallback=[],
                                 keywords=primary_keywords,
-                                limit=100,
+                                limit=200,
                                 platform_keywords=platform_keywords,
                                 cv_data=normalized_cv
                             )
@@ -2193,7 +2605,7 @@ async def search_jobs_from_cv(
                             
                             interleaved = []
                             max_per_source = max(len(jobs) for jobs in jobs_by_source.values()) if jobs_by_source else 0
-                            interleave_limit = min(100, len(unique_jobs))
+                            interleave_limit = min(200, len(unique_jobs))  # Increased from 100 to 200
                             
                             for i in range(max_per_source):
                                 if len(interleaved) >= interleave_limit:
@@ -2281,8 +2693,25 @@ async def search_jobs_from_cv(
                                             if missing_skills:
                                                 job["ats_missing_skills"] = missing_skills
                                         
-                                        # DISABLED: Learning resources feature removed
-                                        job["skill_gaps"] = []
+                                        # Add learning resources for missing skills
+                                        if missing_skills:
+                                            try:
+                                                from cv.matching.learning_resources import LearningResourcesService
+                                                learning_service = LearningResourcesService()
+                                                skill_gaps_with_resources = []
+                                                for skill in missing_skills[:3]:  # Limit to top 3 missing skills
+                                                    resources = learning_service.get_resources_for_skill(skill, limit=2)
+                                                    skill_gaps_with_resources.append({
+                                                        "skill": skill,
+                                                        "resources": resources
+                                                    })
+                                                job["skill_gaps"] = skill_gaps_with_resources
+                                                logger.info(f"[LEARNING RESOURCES] Added resources for {len(skill_gaps_with_resources)} skills for job '{job.get('title', 'Unknown')}'")
+                                            except Exception as resource_error:
+                                                logger.warning(f"Failed to add learning resources: {str(resource_error)}", exc_info=True)
+                                                job["skill_gaps"] = []
+                                        else:
+                                            job["skill_gaps"] = []
                                     except Exception as job_error:
                                         logger.warning(f"Failed to add ATS/resources to job '{job.get('title', 'Unknown')}': {str(job_error)}")
                                         job["skill_gaps"] = []

@@ -5,30 +5,35 @@ import {
   LogOut,
   Building2,
   GraduationCap,
+  Briefcase,
+  RefreshCw,
 } from "lucide-react";
 import Logo from "./Logo";
 
+const ROLE_LABELS = { student: "Job seeker", founder: "Founder", investor: "Investor" };
+
 export default function Layout({ children }) {
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, activeRole, capabilities, switchRole } = useAuth();
   const router = useRouter();
+
+  const role = activeRole || user?.role || "";
+  const allowedRoles = capabilities?.allowed_roles || (role ? [role] : []);
 
   const getNavLinks = () => {
     if (!user) return [];
 
     const links = [];
-    
-    // Job seekers and students see CV Builder
-    if (user.role === 'job_seeker' || user.role === 'student' || !user.role) {
+    const canJobSeeker = capabilities?.job_seeker !== false || role === "student" || role === "job_seeker";
+    const canInvestor = capabilities?.investor !== false || role === "investor";
+    const canFounder = capabilities?.founder === true || role === "founder" || role === "startup";
+
+    if (canJobSeeker) {
       links.push({ href: "/cv-builder", label: "CV Builder", icon: GraduationCap });
     }
-    
-    // Investors see Investments
-    if (user.role === 'investor') {
-      links.push({ href: "/investor-platform", label: "Investments", icon: Building2 });
+    if (canInvestor) {
+      links.push({ href: "/investor-platform", label: "Investments", icon: Briefcase });
     }
-    
-    // Startups see their dashboard (but NOT Investments)
-    if (user.role === 'startup' || user.role === 'founder') {
+    if (canFounder) {
       links.push({ href: "/startup-dashboard", label: "My Startup", icon: Building2 });
     }
 
@@ -36,6 +41,15 @@ export default function Layout({ children }) {
   };
 
   const navLinks = getNavLinks();
+  const showRoleSwitcher = Array.isArray(allowedRoles) && allowedRoles.length > 1;
+
+  const handleRoleSwitch = async (newRole) => {
+    const result = await switchRole(newRole);
+    if (result.success && result.active_role) {
+      const path = result.active_role === "student" ? "/cv-builder" : result.active_role === "founder" ? "/startup-dashboard" : "/investor-platform";
+      router.push(path);
+    }
+  };
 
   // Don't show nav on landing page
   const isLandingPage = router.pathname === '/';
@@ -49,6 +63,21 @@ export default function Layout({ children }) {
               <Logo size="default" />
 
               <div className="flex items-center gap-4">
+                {showRoleSwitcher && (
+                  <div className="flex items-center gap-2 rounded-xl bg-blue-50/80 px-3 py-2 border border-blue-200/60">
+                    <span className="text-xs font-medium text-blue-700 hidden sm:inline">View as</span>
+                    <select
+                      value={role === "startup" ? "founder" : role}
+                      onChange={(e) => handleRoleSwitch(e.target.value)}
+                      className="text-sm font-semibold text-blue-800 bg-transparent border-0 cursor-pointer focus:ring-0 focus:outline-none py-1 pr-6"
+                    >
+                      {allowedRoles.map((r) => (
+                        <option key={r} value={r}>{ROLE_LABELS[r] || r}</option>
+                      ))}
+                    </select>
+                    <RefreshCw className="w-3.5 h-3.5 text-blue-600" />
+                  </div>
+                )}
                 {navLinks.map((link) => {
                   const Icon = link.icon;
                   const isActive = router.pathname === link.href;

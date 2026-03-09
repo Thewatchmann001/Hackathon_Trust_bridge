@@ -22,6 +22,7 @@ import http.client
 import json
 from app.utils.logger import logger
 from app.core.config import settings
+from cv.utils import safe_lower, safe_str
 
 
 class JobAggregator:
@@ -81,8 +82,8 @@ class JobAggregator:
         
         all_jobs = []
         # Increased per-source limit: max(25, limit // 2) for better coverage
-        # With limit=100: per_source_limit = max(25, 50) = 50 jobs per source
-        # Total: 50 × 4 sources = 200 jobs (before domain filtering)
+        # With limit=200: per_source_limit = max(25, 100) = 100 jobs per source
+        # Total: 100 × 4 sources = 400 jobs (before domain filtering)
         per_source_limit = max(25, limit // 2)  # More jobs per source for better variety
         
         # 1. RemoteOK API (free, no auth) - Works best with role + skills
@@ -93,7 +94,7 @@ class JobAggregator:
             remoteok_jobs = self._search_remoteok(kw, per_source_limit)
             # Fallback with skills-only if zero results
             if not remoteok_jobs:
-                skills_only = [k for k in kw if k.lower() in self.SKILL_KEYWORDS]
+                skills_only = [k for k in kw if safe_lower(k) in self.SKILL_KEYWORDS]
                 if skills_only:
                     logger.info(f"RemoteOK: No results with primary keywords, retrying with skills-only: {skills_only[:3]}...")
                     remoteok_jobs = self._search_remoteok(skills_only, per_source_limit)
@@ -110,7 +111,7 @@ class JobAggregator:
             arbeitnow_jobs = self._search_arbeitnow(kw, per_source_limit)
             # Fallback with skills-only if zero results
             if not arbeitnow_jobs:
-                skills_only = [k for k in kw if k.lower() in self.SKILL_KEYWORDS]
+                skills_only = [k for k in kw if safe_lower(k) in self.SKILL_KEYWORDS]
                 if skills_only:
                     logger.info(f"Arbeitnow: No results with primary keywords, retrying with skills-only: {skills_only[:3]}...")
                     arbeitnow_jobs = self._search_arbeitnow(skills_only, per_source_limit)
@@ -220,15 +221,15 @@ class JobAggregator:
                 if not isinstance(job, dict):
                     continue
                 
-                job_title = job.get('position', '').lower()
-                job_description = job.get('description', '').lower()
-                company = job.get('company', '').lower()
+                job_title = safe_lower(job.get('position', ''))
+                job_description = safe_lower(job.get('description', ''))
+                company = safe_lower(job.get('company', ''))
                 
                 # Check if any keyword matches
                 keyword_match = any(
-                    keyword.lower() in job_title or 
-                    keyword.lower() in job_description or 
-                    keyword.lower() in company
+                    safe_lower(keyword) in job_title or 
+                    safe_lower(keyword) in job_description or 
+                    safe_lower(keyword) in company
                     for keyword in keywords
                 )
                 
@@ -275,17 +276,17 @@ class JobAggregator:
                 if not isinstance(job, dict):
                     continue
                 
-                title = job.get('title', '').lower()
-                description = job.get('description', '').lower()
-                company = job.get('company_name', '').lower()
-                tags = ' '.join(job.get('tags', [])).lower()
+                title = safe_lower(job.get('title', ''))
+                description = safe_lower(job.get('description', ''))
+                company = safe_lower(job.get('company_name', ''))
+                tags = safe_lower(' '.join(job.get('tags', [])))
                 
                 # Check if any keyword matches
                 keyword_match = any(
-                    keyword.lower() in title or 
-                    keyword.lower() in description or 
-                    keyword.lower() in company or
-                    keyword.lower() in tags
+                    safe_lower(keyword) in title or 
+                    safe_lower(keyword) in description or 
+                    safe_lower(keyword) in company or
+                    safe_lower(keyword) in tags
                     for keyword in keywords
                 )
                 
@@ -589,7 +590,7 @@ class JobAggregator:
                             'description': self._clean_html(job.get('description', ''))[:500],
                             'applyUrl': job.get('redirect_url', job.get('url', '')),
                             'source': 'Adzuna',
-                            'type': 'Remote' if 'remote' in job_location.lower() or 'remote' in str(job).lower() else 'Job',
+                            'type': 'Remote' if 'remote' in safe_lower(job_location) or 'remote' in safe_lower(str(job)) else 'Job',
                             'posted_date': job.get('created', job.get('created_at', '')),
                             'skills': [],  # Adzuna doesn't provide skills in basic response
                             'salary': self._format_adzuna_salary(job),
@@ -674,7 +675,7 @@ class JobAggregator:
             
             # Filter and format jobs
             formatted_jobs = []
-            keywords_lower = [k.lower() for k in keywords] if keywords else []
+            keywords_lower = [safe_lower(k) for k in keywords] if keywords else []
             
             for job in jobs_list:
                 if not isinstance(job, dict):
@@ -692,7 +693,7 @@ class JobAggregator:
                 # For Y-Combinator, be more lenient - include all jobs if keywords don't match well
                 # YC jobs are high-quality startup jobs, so we want to show them even if keyword match is weak
                 if keywords:
-                    job_text = f"{title} {description} {company}".lower()
+                    job_text = safe_lower(f"{title} {description} {company}")
                     keyword_match = any(kw in job_text for kw in keywords_lower)
                     # If no match but we have few results, include anyway (YC jobs are valuable)
                     if not keyword_match and len(formatted_jobs) < limit // 2:
@@ -779,7 +780,7 @@ class JobAggregator:
             
             # Filter and format jobs
             formatted_jobs = []
-            keywords_lower = [k.lower() for k in keywords] if keywords else []
+            keywords_lower = [safe_lower(k) for k in keywords] if keywords else []
             
             for job in jobs_list:
                 if not isinstance(job, dict):
@@ -797,7 +798,7 @@ class JobAggregator:
                 # For Internships, be more lenient - include all jobs if keywords don't match well
                 # Internships are valuable opportunities, so we want to show them even if keyword match is weak
                 if keywords:
-                    job_text = f"{title} {description} {company}".lower()
+                    job_text = safe_lower(f"{title} {description} {company}")
                     keyword_match = any(kw in job_text for kw in keywords_lower)
                     # If no match but we have few results, include anyway (internships are valuable)
                     if not keyword_match and len(formatted_jobs) < limit // 2:
@@ -850,7 +851,7 @@ class JobAggregator:
         """
         cv_skills = self._extract_cv_skills(cv_data)
         cv_experience = self._extract_cv_experience(cv_data)
-        cv_job_titles = [exp.get("job_title", "").lower() for exp in cv_experience if exp.get("job_title")]
+        cv_job_titles = [safe_lower(exp.get("job_title", "")) for exp in cv_experience if exp.get("job_title")]
         
         # Get generic ATS score first (for job-specific calculation)
         from cv.ats_engine import ATSEngine
@@ -869,13 +870,13 @@ class JobAggregator:
             score = 0.0
             
             # Skills match (40%)
-            job_skills = [s.lower() if isinstance(s, str) else str(s).lower() for s in job.get("skills", [])]
+            job_skills = [safe_lower(s) for s in job.get("skills", [])]
             if job_skills:
                 matches = sum(1 for skill in job_skills if any(cv_skill in skill or skill in cv_skill for cv_skill in cv_skills))
                 score += (matches / len(job_skills)) * 0.4
             
             # Job title match (30%)
-            job_title = job.get("title", "").lower()
+            job_title = safe_lower(job.get("title", ""))
             if cv_job_titles:
                 title_match = any(cv_title in job_title or job_title in cv_title for cv_title in cv_job_titles)
                 if title_match:
@@ -883,15 +884,15 @@ class JobAggregator:
             
             # Experience match (20%)
             # Check if job description mentions experience levels that match CV
-            job_desc = job.get("description", "").lower()
+            job_desc = safe_lower(job.get("description", ""))
             if cv_experience:
                 # Simple heuristic: if job mentions "years" and CV has experience
                 if "year" in job_desc and len(cv_experience) > 0:
                     score += 0.2
             
             # Description keyword overlap (10%)
-            job_text = f"{job_title} {job_desc}".lower()
-            cv_text = " ".join(cv_skills).lower()
+            job_text = safe_lower(f"{job_title} {job_desc}")
+            cv_text = safe_lower(" ".join(cv_skills))
             job_words = set(job_text.split())
             cv_words = set(cv_text.split())
             overlap = len(job_words.intersection(cv_words))
@@ -903,22 +904,47 @@ class JobAggregator:
             
             # NEW: Calculate job-specific ATS score
             try:
-                # Extract job description - try multiple fields
+                # Safely extract job title - handle lists
+                job_title_raw = job.get("title", "") or job.get("job_title", "")
+                if isinstance(job_title_raw, list):
+                    job_title = " ".join(str(item) for item in job_title_raw if item)
+                elif not isinstance(job_title_raw, str):
+                    job_title = str(job_title_raw) if job_title_raw else ""
+                else:
+                    job_title = job_title_raw
+                
+                # Extract job description - try multiple fields, handle lists
                 job_desc = job.get("description", "") or job.get("summary", "") or job.get("job_description", "") or ""
                 # Get full description if available (not truncated)
                 if job.get("full_description"):
                     job_desc = job.get("full_description")
                 
-                # Extract job skills - try multiple fields
-                job_skills_list = job.get("skills", []) or job.get("job_skills", []) or job.get("tags", []) or []
-                # Ensure it's a list
-                if isinstance(job_skills_list, str):
-                    job_skills_list = [job_skills_list]
-                elif not isinstance(job_skills_list, list):
+                # Ensure job_desc is a string (handle lists)
+                if isinstance(job_desc, list):
+                    job_desc = " ".join(str(item) for item in job_desc if item)
+                elif not isinstance(job_desc, str):
+                    job_desc = str(job_desc) if job_desc else ""
+                
+                # Extract job skills - try multiple fields, handle nested lists
+                job_skills_raw = job.get("skills", []) or job.get("job_skills", []) or job.get("tags", []) or []
+                job_skills_list = []
+                
+                if isinstance(job_skills_raw, str):
+                    job_skills_list = [s.strip() for s in job_skills_raw.split(",") if s.strip()]
+                elif isinstance(job_skills_raw, list):
+                    for item in job_skills_raw:
+                        if item:
+                            if isinstance(item, str):
+                                job_skills_list.append(item)
+                            elif isinstance(item, list):
+                                job_skills_list.extend([str(s) for s in item if s])
+                            else:
+                                job_skills_list.append(str(item))
+                else:
                     job_skills_list = []
                 
                 job_context = {
-                    "job_title": job.get("title", "") or job.get("job_title", ""),
+                    "job_title": job_title,
                     "job_description": job_desc,
                     "job_skills": job_skills_list
                 }
@@ -977,7 +1003,7 @@ class JobAggregator:
             skills.extend(skills_data.get("technical", []))
         elif isinstance(skills_data, list):
             skills = [s.get("name", s) if isinstance(s, dict) else s for s in skills_data]
-        return [str(s).lower() for s in skills if s]
+        return [safe_lower(s) for s in skills if s]
     
     def _extract_cv_experience(self, cv_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Extract experience from CV data."""

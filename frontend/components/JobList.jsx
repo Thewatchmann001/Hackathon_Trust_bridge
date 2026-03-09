@@ -7,7 +7,7 @@
  * Only fetches if no jobs in context (fallback for direct navigation)
  */
 import { useState, useEffect } from 'react';
-import { Briefcase, MapPin, Building2, ExternalLink, Loader, Search } from 'lucide-react';
+import { Briefcase, MapPin, Building2, ExternalLink, Loader, Search, Sparkles, AlertCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cvAPI } from '../lib/api';
 import toast from 'react-hot-toast';
@@ -25,6 +25,17 @@ export default function JobList({ keywords = [], jobTitles = [], location = null
   
   // Use context jobs if available, otherwise use local
   const displayJobs = matchedJobs.length > 0 ? matchedJobs : jobs;
+  
+  // Helper function to normalize match score (handles both decimal 0-1 and percentage 0-100)
+  const formatMatchScore = (score) => {
+    if (score === undefined || score === null) return null;
+    // If score is less than 1, it's a decimal (0-1), convert to percentage
+    if (score < 1) {
+      return parseFloat((score * 100).toFixed(1));
+    }
+    // Otherwise it's already a percentage
+    return parseFloat(score.toFixed(1));
+  };
 
   useEffect(() => {
     // CRITICAL FIX: Only fetch if no jobs in context
@@ -40,30 +51,61 @@ export default function JobList({ keywords = [], jobTitles = [], location = null
     fetchJobs();
   }, [keywords, jobTitles, location, userId, matchedJobs.length]); // Added matchedJobs.length to detect context updates
 
-  const fetchJobs = async () => {
+  const fetchJobs = async (useV2 = true) => {
     setLoading(true);
     setError(null);
     
     try {
-      // CRITICAL: If userId is provided, backend will return stored matches from Quick Upload
-      // Don't use default keywords if userId is available - let backend use stored matches
-      // Only use default keywords as fallback if userId is not available
-      const searchKeywords = (keywords && keywords.length > 0) 
-        ? keywords 
-        : (userId ? [] : ['software', 'developer', 'engineer', 'technology']); // Empty keywords if userId available (backend will use stored matches)
+      let jobsList = [];
+      let metadata = {};
       
-      const response = await cvAPI.searchJobs(
-        searchKeywords,
-        jobTitles && jobTitles.length > 0 ? jobTitles : null,
-        searchLocation || null,
-        limit,
-        userId  // CRITICAL: Must pass userId to get stored matches from Quick Upload
-      );
+      // Try new v2 endpoint first if userId is available
+      if (useV2 && userId) {
+        try {
+          const response = await cvAPI.matchJobsV2(
+            userId,
+            null, // cv_id (will be fetched from user_id)
+            keywords && keywords.length > 0 ? keywords : null,
+            searchLocation || null,
+            limit
+          );
+          
+          const data = response.data || response;
+          if (data.success) {
+            jobsList = data.jobs || [];
+            metadata = data.metadata || {};
+            console.log('[JobList] Using new v2 matching system:', {
+              jobs: jobsList.length,
+              providers: metadata.provider_metrics,
+              duration: metadata.duration_seconds
+            });
+          } else {
+            throw new Error(data.error || 'V2 matching failed');
+          }
+        } catch (v2Error) {
+          console.warn('[JobList] V2 endpoint failed, falling back to v1:', v2Error);
+          // Fallback to v1
+          useV2 = false;
+        }
+      }
+      
+      // Fallback to v1 endpoint
+      if (!useV2 || jobsList.length === 0) {
+        const searchKeywords = (keywords && keywords.length > 0) 
+          ? keywords 
+          : (userId ? [] : ['software', 'developer', 'engineer', 'technology']);
+        
+        const response = await cvAPI.searchJobs(
+          searchKeywords,
+          jobTitles && jobTitles.length > 0 ? jobTitles : null,
+          searchLocation || null,
+          limit,
+          userId
+        );
 
-      // Axios returns response.data directly for successful requests
-      // Check if response is an axios response object or direct data
-      const data = response.data || response;
-      const jobsList = data.jobs || (Array.isArray(data) ? data : []);
+        const data = response.data || response;
+        jobsList = data.jobs || (Array.isArray(data) ? data : []);
+      }
       
       // Remove duplicates based on title, company, AND source
       const seen = new Set();
@@ -85,23 +127,20 @@ export default function JobList({ keywords = [], jobTitles = [], location = null
       if (uniqueJobs.length === 0) {
         toast('No jobs found. Try different keywords or location.', { icon: 'ℹ️' });
       } else {
-        toast.success(`Found ${uniqueJobs.length} unique jobs!`);
+        const matchInfo = metadata.matched_jobs ? ` (${metadata.matched_jobs} matched)` : '';
+        toast.success(`Found ${uniqueJobs.length} unique jobs${matchInfo}!`);
       }
     } catch (err) {
       console.error('Error fetching jobs:', err);
       
-      // Better error message extraction
       let errorMessage = 'Failed to fetch jobs. Please try again.';
       
       if (err.response) {
-        // Axios error with response
         errorMessage = err.response.data?.detail || err.response.data?.message || err.response.statusText || errorMessage;
       } else if (err.message) {
-        // General error message
         errorMessage = err.message;
       }
       
-      // Log full error for debugging
       console.error('Full error details:', {
         message: err.message,
         response: err.response?.data,
@@ -219,86 +258,101 @@ export default function JobList({ keywords = [], jobTitles = [], location = null
                   <span className="text-gray-600 text-sm">{job.location || 'Location not specified'}</span>
                 </div>
 
-                {/* ATS Score Display */}
-                {job.ats_score !== undefined && (
-                  <div className="mb-3 p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-gray-700">CV Match Score</span>
-                      <span className={`text-lg font-bold ${
-                        job.ats_score >= 80 ? 'text-green-600' :
-                        job.ats_score >= 60 ? 'text-blue-600' :
-                        job.ats_score >= 40 ? 'text-yellow-600' :
-                        'text-red-600'
-                      }`}>
-                        {job.ats_score}/100
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
-                        job.ats_grade === 'A+' || job.ats_grade === 'A' ? 'bg-green-100 text-green-800' :
-                        job.ats_grade === 'B' ? 'bg-blue-100 text-blue-800' :
-                        job.ats_grade === 'C' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-red-100 text-red-800'
-                      }`}>
-                        Grade: {job.ats_grade || 'N/A'}
-                      </span>
-                      {job.ats_relevance !== null && job.ats_relevance !== undefined && (
-                        <span className="text-xs text-gray-600">
-                          Relevance: {(job.ats_relevance * 100).toFixed(0)}%
-                        </span>
-                      )}
-                    </div>
-                    {job.ats_keyword_overlap_percentage !== undefined && (
-                      <div className="mt-2 text-xs text-gray-600">
-                        <span className="font-medium">Keywords matched: </span>
-                        {job.ats_keyword_overlap || 0} / {job.ats_matched_keywords?.length || 0} ({job.ats_keyword_overlap_percentage.toFixed(0)}%)
-                      </div>
-                    )}
-                    {/* Skill Gaps with Learning Resources */}
-                    {job.skill_gaps && job.skill_gaps.length > 0 && (
-                      <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                        <div className="flex items-start gap-2 mb-2">
-                          <span className="text-xs font-semibold text-amber-800">
-                            ⚠️ Skill Gap Detected
+                {/* Source Badge */}
+                {job.source && (
+                  <div className="mb-3">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-sky-100 text-sky-800">
+                      {job.source}
+                    </span>
+                  </div>
+                )}
+
+                {/* Missing Skills and Learning Resources (ATS Score removed per user request) */}
+                {(job.ats_missing_skills && job.ats_missing_skills.length > 0) && (
+                  <div className="mb-3 p-3 bg-gradient-to-r from-amber-50 to-yellow-50 rounded-lg border border-amber-200">
+                    {/* Missing Skills Display */}
+                    <div className="mb-3">
+                      <p className="text-xs font-semibold text-amber-700 mb-2 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        Missing Skills:
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {job.ats_missing_skills.map((skill, idx) => (
+                          <span 
+                            key={idx} 
+                            className="px-2 py-1 bg-amber-100 text-amber-800 rounded-md text-xs font-medium border border-amber-200"
+                          >
+                            {skill}
                           </span>
-                        </div>
-                        <p className="text-xs text-amber-700 mb-2">
-                          You lack some required skills, but we've linked free resources to help you learn them.
+                        ))}
+                      </div>
+                      <p className="text-xs text-amber-600 mt-2">
+                        Consider learning these skills to improve your match
+                      </p>
+                    </div>
+                    
+                    {/* Learning Resources - Use backend-provided resources */}
+                    {(job.skill_gaps && job.skill_gaps.length > 0) && (
+                      <div className="pt-3 border-t border-green-200">
+                        <p className="text-xs font-semibold text-green-700 mb-2 flex items-center gap-1">
+                          <span className="text-green-600">📚</span>
+                          Free Learning Resources:
                         </p>
                         <div className="space-y-2">
-                          {job.skill_gaps.slice(0, 2).map((gap, gapIdx) => (
-                            <div key={gapIdx} className="bg-white rounded p-2 border border-amber-100">
-                              <div className="text-xs font-semibold text-gray-800 mb-1">
-                                Missing: {gap.skill}
-                              </div>
-                              {gap.resources && gap.resources.length > 0 && (
-                                <div className="space-y-1">
-                                  {gap.resources.slice(0, 2).map((resource, resIdx) => (
+                          {job.skill_gaps.slice(0, 3).map((gap, idx) => (
+                            <div key={idx} className="p-2 bg-green-50 border border-green-200 rounded">
+                              <p className="text-xs font-semibold text-green-800 mb-2">
+                                Learn {gap.skill}
+                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                {gap.resources && gap.resources.length > 0 ? (
+                                  gap.resources.map((resource, resIdx) => (
                                     <a
                                       key={resIdx}
                                       href={resource.url}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="block text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                                      className="text-xs text-green-600 hover:text-green-800 underline px-2 py-1 bg-white rounded border border-green-200"
                                     >
-                                      📚 {resource.platform}: {resource.title}
+                                      {resource.platform}
                                     </a>
-                                  ))}
-                                </div>
-                              )}
+                                  ))
+                                ) : (
+                                  // Fallback to hardcoded URLs if backend didn't provide resources
+                                  <>
+                                    <a
+                                      href={`https://www.youtube.com/results?search_query=learn+${encodeURIComponent(gap.skill)}+tutorial+free`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-xs text-green-600 hover:text-green-800 underline px-2 py-1 bg-white rounded border border-green-200"
+                                    >
+                                      YouTube
+                                    </a>
+                                    <a
+                                      href={`https://www.coursera.org/search?query=${encodeURIComponent(gap.skill)}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-xs text-green-600 hover:text-green-800 underline px-2 py-1 bg-white rounded border border-green-200"
+                                    >
+                                      Coursera
+                                    </a>
+                                    <a
+                                      href={`https://alison.com/courses?query=${encodeURIComponent(gap.skill)}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-xs text-green-600 hover:text-green-800 underline px-2 py-1 bg-white rounded border border-green-200"
+                                    >
+                                      Alison
+                                    </a>
+                                  </>
+                                )}
+                              </div>
                             </div>
                           ))}
                         </div>
-                      </div>
-                    )}
-                    {/* Fallback: Show missing skills if skill_gaps not available */}
-                    {(!job.skill_gaps || job.skill_gaps.length === 0) && job.ats_missing_skills && job.ats_missing_skills.length > 0 && (
-                      <div className="mt-2 text-xs">
-                        <span className="font-medium text-gray-700">Missing skills: </span>
-                        <span className="text-red-600">{job.ats_missing_skills.slice(0, 3).join(', ')}</span>
-                        {job.ats_missing_skills.length > 3 && (
-                          <span className="text-gray-500"> +{job.ats_missing_skills.length - 3} more</span>
-                        )}
+                        <p className="text-xs text-green-600 mt-2 italic">
+                          Click to access free courses and tutorials
+                        </p>
                       </div>
                     )}
                   </div>

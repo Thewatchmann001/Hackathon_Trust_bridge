@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     FRONTEND_URL: str = "http://localhost:3000"
     
+    # CORS: comma-separated extra origins for production (e.g. https://trustbridge-frontend-xxx.run.app)
+    CORS_ORIGINS: Optional[str] = None
+    
+    # Stripe (card payments: investor -> startup)
+    STRIPE_SECRET_KEY: Optional[str] = None  # sk_test_... or sk_live_...
+    STRIPE_WEBHOOK_SECRET: Optional[str] = None  # whsec_... for webhook signature verification
+    STRIPE_PUBLISHABLE_KEY: Optional[str] = None  # pk_test_... for frontend (optional)
+    
     # File Uploads
     UPLOAD_DIR: str = "static/uploads"
     MAX_UPLOAD_SIZE: int = 5 * 1024 * 1024  # 5MB

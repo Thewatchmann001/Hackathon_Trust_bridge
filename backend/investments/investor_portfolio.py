@@ -70,7 +70,7 @@ class InvestorPortfolio:
                     "amount": inv.amount,
                     "tx_signature": inv.tx_signature,
                     "timestamp": inv.timestamp.isoformat() if inv.timestamp else None,
-                    "explorer_url": f"https://explorer.solana.com/tx/{inv.tx_signature}?cluster=devnet" if inv.tx_signature and not inv.tx_signature.startswith("mock_") else None
+                    "explorer_url": f"https://explorer.solana.com/tx/{inv.tx_signature}?cluster=devnet" if inv.tx_signature and not inv.tx_signature.startswith("mock_") and not inv.tx_signature.startswith("stripe:") else None
                 })
         
         return {
@@ -89,7 +89,7 @@ class InvestorPortfolio:
                     "amount": inv.amount,
                     "tx_signature": inv.tx_signature,
                     "timestamp": inv.timestamp.isoformat() if inv.timestamp else None,
-                    "explorer_url": f"https://explorer.solana.com/tx/{inv.tx_signature}?cluster=devnet" if inv.tx_signature and not inv.tx_signature.startswith("mock_") else None
+                    "explorer_url": f"https://explorer.solana.com/tx/{inv.tx_signature}?cluster=devnet" if inv.tx_signature and not inv.tx_signature.startswith("mock_") and not inv.tx_signature.startswith("stripe:") else None
                 }
                 for inv in investments
             ]
@@ -127,7 +127,7 @@ class InvestorPortfolio:
                 "amount": inv.amount,
                 "tx_signature": inv.tx_signature,
                 "timestamp": inv.timestamp.isoformat() if inv.timestamp else None,
-                "explorer_url": f"https://explorer.solana.com/tx/{inv.tx_signature}?cluster=devnet" if inv.tx_signature and not inv.tx_signature.startswith("mock_") else None
+                "explorer_url": f"https://explorer.solana.com/tx/{inv.tx_signature}?cluster=devnet" if inv.tx_signature and not inv.tx_signature.startswith("mock_") and not inv.tx_signature.startswith("stripe:") else None
             })
         
         return result

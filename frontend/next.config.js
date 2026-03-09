@@ -11,6 +11,15 @@ const nextConfig = {
       ...(config.resolve.alias || {}),
     };
 
+    // Reduce "EMFILE: too many open files" in dev: use polling when requested
+    if (process.env.CHOKIDAR_USEPOLLING === 'true') {
+      config.watchOptions = {
+        ...config.watchOptions,
+        poll: 2000,
+        ignored: /node_modules/,
+      };
+    }
+
     // Add a module rule to handle the missing nested import
     config.resolve.modules = [
       ...(config.resolve.modules || []),

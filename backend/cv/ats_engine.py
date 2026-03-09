@@ -24,6 +24,7 @@ import json
 import re
 from typing import Dict, List, Any, Tuple, Optional
 from app.utils.logger import logger
+from cv.utils import safe_lower
 
 
 class ATSEngine:
@@ -97,7 +98,9 @@ class ATSEngine:
         - keyword_overlap (if job_context provided) - How many job keywords match CV
         - missing_skills (if job_context provided) - Required skills missing from CV
         """
+        logger.info("=" * 80)
         logger.info("ATSEngine: Starting ATS analysis")
+        logger.info("=" * 80)
         
         # DEBUG: Log CV data structure to diagnose issues
         logger.info(f"ATSEngine: CV data keys: {list(cv_data.keys()) if isinstance(cv_data, dict) else 'NOT A DICT'}")
@@ -105,16 +108,71 @@ class ATSEngine:
         logger.info(f"ATSEngine: CV data has skills: {bool(cv_data.get('skills') or cv_data.get('personal_skills'))}")
         logger.info(f"ATSEngine: CV data has summary: {bool(cv_data.get('summary') or cv_data.get('professional_summary'))}")
 
+        # DETAILED EXTRACTION LOGGING
+        logger.info("-" * 80)
+        logger.info("ATSEngine: DETAILED CV EXTRACTION")
+        logger.info("-" * 80)
+        
+        # Extract and log all skills
+        all_cv_skills = self._extract_all_cv_skills(cv_data)
+        logger.info(f"ATSEngine: EXTRACTED SKILLS ({len(all_cv_skills)} total):")
+        for i, skill in enumerate(all_cv_skills, 1):
+            logger.info(f"  [{i}] {skill}")
+        
+        # Extract and log experience
+        experience = cv_data.get("experience", []) or cv_data.get("work_experience", [])
+        logger.info(f"ATSEngine: EXTRACTED EXPERIENCE ({len(experience)} entries):")
+        for i, exp in enumerate(experience, 1):
+            if isinstance(exp, dict):
+                logger.info(f"  [{i}] Job Title: {exp.get('job_title', exp.get('title', exp.get('position', 'N/A')))}")
+                logger.info(f"      Company: {exp.get('company', exp.get('employer', 'N/A'))}")
+                logger.info(f"      Dates: {exp.get('start_date', 'N/A')} to {exp.get('end_date', 'N/A')}")
+                desc = exp.get('description', exp.get('responsibilities', exp.get('duties', '')))
+                if desc:
+                    desc_preview = desc[:100] + "..." if len(desc) > 100 else desc
+                    logger.info(f"      Description: {desc_preview}")
+        
+        # Extract and log education
+        education = cv_data.get("education", [])
+        logger.info(f"ATSEngine: EXTRACTED EDUCATION ({len(education)} entries):")
+        for i, edu in enumerate(education, 1):
+            if isinstance(edu, dict):
+                logger.info(f"  [{i}] Degree: {edu.get('degree', edu.get('qualification', 'N/A'))}")
+                logger.info(f"      Field: {edu.get('field_of_study', 'N/A')}")
+                logger.info(f"      Institution: {edu.get('institution', edu.get('school', 'N/A'))}")
+        
+        # Extract and log summary
+        summary = cv_data.get("summary", cv_data.get("professional_summary", ""))
+        if summary:
+            summary_preview = summary[:200] + "..." if len(summary) > 200 else summary
+            logger.info(f"ATSEngine: EXTRACTED SUMMARY ({len(summary)} chars): {summary_preview}")
+        else:
+            logger.info("ATSEngine: EXTRACTED SUMMARY: (empty)")
+        
+        # Extract and log personal info
+        personal_info = cv_data.get("personal_info", {})
+        logger.info(f"ATSEngine: EXTRACTED PERSONAL INFO:")
+        logger.info(f"  Name: {personal_info.get('full_name', personal_info.get('first_name', '') + ' ' + personal_info.get('surname', '')).strip() or 'N/A'}")
+        logger.info(f"  Email: {personal_info.get('email', 'N/A')}")
+        logger.info(f"  Location: {personal_info.get('location', 'N/A')}")
+        
+        logger.info("-" * 80)
+
         # Generate CV hash
         cv_hash = self._generate_cv_hash(cv_data)
         logger.info(f"ATSEngine: CV hash = {cv_hash[:16]}...")
+        logger.info(f"ATSEngine: Stored hash = {stored_hash[:16] if stored_hash else 'None'}...")
+        logger.info(f"ATSEngine: Hash match = {stored_hash == cv_hash if stored_hash else 'N/A'}")
+        logger.info(f"ATSEngine: Force recompute = {force_recompute}")
+        logger.info(f"ATSEngine: Job context provided = {bool(job_context)}")
 
         # FIX 3: Respect cached scores when hash matches (unless force_recompute OR job_context provided)
         # CRITICAL: If job_context is provided, we MUST calculate job-specific scores (even if CV hash matches)
         # Job-specific scores depend on job context, not just CV content
         if not force_recompute and stored_hash and stored_hash == cv_hash and not job_context:
             # Only return cached score if NO job_context (generic ATS only)
-            logger.info(f"ATSEngine: CV hash matches stored hash (reusing cached score). Set force_recompute=True to recalculate.")
+            logger.info(f"ATSEngine: ⚠️ CV hash matches stored hash (reusing cached score). Set force_recompute=True to recalculate.")
+            logger.info(f"ATSEngine: ⚠️ This may cause score fluctuations if CV data structure changed but hash didn't!")
             return {
                 "reused_from_cache": True,
                 "cv_hash": cv_hash,
@@ -136,26 +194,41 @@ class ATSEngine:
         # ========== COMPONENT SCORING ==========
         components = {}
 
+        logger.info("-" * 80)
+        logger.info("ATSEngine: COMPONENT SCORING")
+        logger.info("-" * 80)
+
         # 1. Keyword & Skill Match (30%)
         components["keyword_match"] = self._score_keyword_match(cv_data, normalized_text)
+        logger.info(f"ATSEngine: [1/6] Keyword Match Score: {components['keyword_match']['score']}/100")
+        logger.info(f"ATSEngine:   Matched Keywords ({len(components['keyword_match'].get('matched_keywords', []))}): {components['keyword_match'].get('matched_keywords', [])[:10]}")
 
         # 2. Experience Quality (20%)
         components["experience_quality"] = self._score_experience_quality(cv_data, normalized_text)
+        logger.info(f"ATSEngine: [2/6] Experience Quality Score: {components['experience_quality']['score']}/100")
 
         # 3. Formatting & ATS Readability (15%)
         components["formatting"] = self._score_formatting(cv_data, normalized_text)
+        logger.info(f"ATSEngine: [3/6] Formatting Score: {components['formatting']['score']}/100")
+        if components['formatting'].get('red_flags_found', 0) > 0:
+            logger.info(f"ATSEngine:   Red Flags Found: {components['formatting'].get('red_flags_found', 0)}")
 
         # 4. Section Completeness (10%)
         components["completeness"] = self._score_completeness(cv_data)
+        logger.info(f"ATSEngine: [4/6] Completeness Score: {components['completeness']['score']}/100")
 
         # 5. Achievement Quantification (10%)
         components["quantification"] = self._score_quantification(normalized_text)
+        logger.info(f"ATSEngine: [5/6] Quantification Score: {components['quantification']['score']}/100")
 
         # 6. Role Consistency (10%)
         components["role_consistency"] = self._score_role_consistency(cv_data)
+        logger.info(f"ATSEngine: [6/6] Role Consistency Score: {components['role_consistency']['score']}/100")
 
         # 7. Red Flags (−5%)
         components["red_flags_penalty"] = self._score_red_flags(normalized_text)
+        if components['red_flags_penalty'].get('penalty', 0) > 0:
+            logger.info(f"ATSEngine: [7/7] Red Flags Penalty: -{components['red_flags_penalty'].get('penalty', 0)} points")
 
         # ========== CALCULATE FINAL SCORE ==========
         weights = {
@@ -188,11 +261,39 @@ class ATSEngine:
             else:
                 component_scores_log[k] = components[k].get("score", 0)
 
-        logger.info(f"ATSEngine: Final score = {ats_score}/100 (Grade: {ats_grade})")
-        logger.info(f"ATSEngine: Component scores = {component_scores_log}")
+        logger.info("=" * 80)
+        logger.info(f"ATSEngine: FINAL SCORE = {ats_score}/100 (Grade: {ats_grade})")
+        logger.info(f"ATSEngine: Component scores breakdown = {component_scores_log}")
+        logger.info("=" * 80)
 
         # ========== GENERATE ISSUES & RECOMMENDATIONS ==========
         issues, recommendations = self._generate_feedback(cv_data, normalized_text, components, ats_score)
+        
+        logger.info("-" * 80)
+        logger.info("ATSEngine: ISSUES & RECOMMENDATIONS")
+        logger.info("-" * 80)
+        logger.info(f"ATSEngine: Issues Found ({len(issues)}):")
+        for i, issue in enumerate(issues, 1):
+            logger.info(f"  [{i}] [{issue.get('severity', 'unknown').upper()}] {issue.get('category', 'unknown')}: {issue.get('message', 'N/A')}")
+        
+        logger.info(f"ATSEngine: Recommendations ({len(recommendations)}):")
+        for i, rec in enumerate(recommendations, 1):
+            logger.info(f"  [{i}] {rec}")
+        
+        logger.info("-" * 80)
+        
+        logger.info("-" * 80)
+        logger.info("ATSEngine: ISSUES & RECOMMENDATIONS")
+        logger.info("-" * 80)
+        logger.info(f"ATSEngine: Issues Found ({len(issues)}):")
+        for i, issue in enumerate(issues, 1):
+            logger.info(f"  [{i}] [{issue.get('severity', 'unknown').upper()}] {issue.get('category', 'unknown')}: {issue.get('message', 'N/A')}")
+        
+        logger.info(f"ATSEngine: Recommendations ({len(recommendations)}):")
+        for i, rec in enumerate(recommendations, 1):
+            logger.info(f"  [{i}] {rec}")
+        
+        logger.info("-" * 80)
 
         # ========== VALIDATE MANDATORY FIELDS ==========
         if ats_score < 90:
@@ -368,20 +469,37 @@ class ATSEngine:
                 if pi.get("email"):
                     parts.append(str(pi.get("email", "")))
 
-            # Summary
-            if cv_data.get("summary"):
-                parts.append(str(cv_data["summary"]))
-            elif cv_data.get("professional_summary"):
-                parts.append(str(cv_data["professional_summary"]))
+            # Summary - handle lists
+            summary = cv_data.get("summary") or cv_data.get("professional_summary")
+            if summary:
+                if isinstance(summary, list):
+                    parts.append(" ".join(str(item) for item in summary if item))
+                else:
+                    parts.append(str(summary))
 
-            # Experience
+            # Experience - handle lists in fields
             exp_list = cv_data.get("experience", []) or []
             work_exp_list = cv_data.get("work_experience", []) or []
             for exp in exp_list + work_exp_list:
                 if isinstance(exp, dict):
                     job_title = exp.get("job_title") or exp.get("position") or exp.get("title") or ""
+                    if isinstance(job_title, list):
+                        job_title = " ".join(str(item) for item in job_title if item)
+                    else:
+                        job_title = str(job_title) if job_title else ""
+                    
                     company = exp.get("company") or exp.get("employer") or exp.get("organization") or ""
+                    if isinstance(company, list):
+                        company = " ".join(str(item) for item in company if item)
+                    else:
+                        company = str(company) if company else ""
+                    
                     desc = exp.get("description") or exp.get("responsibilities") or exp.get("duties") or ""
+                    if isinstance(desc, list):
+                        desc = " ".join(str(item) for item in desc if item)
+                    else:
+                        desc = str(desc) if desc else ""
+                    
                     parts.append(f"{job_title} {company} {desc}")
 
             # Education
@@ -389,8 +507,17 @@ class ATSEngine:
             for edu in edu_list:
                 if isinstance(edu, dict):
                     degree = edu.get("degree") or edu.get("qualification") or ""
+                    if isinstance(degree, list):
+                        degree = " ".join(str(item) for item in degree if item)
+                    
                     institution = edu.get("institution") or edu.get("school") or edu.get("university") or ""
+                    if isinstance(institution, list):
+                        institution = " ".join(str(item) for item in institution if item)
+                    
                     field = edu.get("field_of_study") or edu.get("major") or ""
+                    if isinstance(field, list):
+                        field = " ".join(str(item) for item in field if item)
+                    
                     parts.append(f"{degree} {institution} {field}")
 
             # Skills - handle both lowercase and capitalized category names
@@ -400,7 +527,17 @@ class ATSEngine:
                 for skill_type in ["technical", "job_related_skills", "computer_skills", "programming_skills", "soft", "social_skills", "languages", "tools"]:
                     skill_list = skills_data.get(skill_type) or []
                     if isinstance(skill_list, list):
-                        parts.append(" ".join(str(s) for s in skill_list))
+                        # Handle nested lists and ensure all items are strings
+                        skill_strings = []
+                        for s in skill_list:
+                            if isinstance(s, str):
+                                skill_strings.append(s)
+                            elif isinstance(s, list):
+                                skill_strings.extend([str(item) for item in s if item])
+                            else:
+                                skill_strings.append(str(s))
+                        if skill_strings:
+                            parts.append(" ".join(skill_strings))
                     elif isinstance(skill_list, str):
                         parts.append(skill_list)
                 
@@ -408,20 +545,44 @@ class ATSEngine:
                 for skill_category in ["Programming Languages", "Frameworks and Libraries", "Blockchain", "Databases", "Data Science", "Tools and Platforms"]:
                     skill_list = skills_data.get(skill_category) or []
                     if isinstance(skill_list, list):
-                        parts.append(" ".join(str(s) for s in skill_list))
+                        # Handle nested lists and ensure all items are strings
+                        skill_strings = []
+                        for s in skill_list:
+                            if isinstance(s, str):
+                                skill_strings.append(s)
+                            elif isinstance(s, list):
+                                skill_strings.extend([str(item) for item in s if item])
+                            else:
+                                skill_strings.append(str(s))
+                        if skill_strings:
+                            parts.append(" ".join(skill_strings))
                     elif isinstance(skill_list, str):
                         parts.append(skill_list)
             
-            # Projects
+            # Projects - CRITICAL: Include projects for quantification scoring
             projects = cv_data.get("projects", []) or []
+            if projects:
+                logger.info(f"ATSEngine: Found {len(projects)} projects - including in normalized text for quantification scoring")
             for proj in projects:
                 if isinstance(proj, dict):
                     title = proj.get("title") or proj.get("name") or ""
+                    if isinstance(title, list):
+                        title = " ".join(str(item) for item in title if item)
+                    
                     desc = proj.get("description") or ""
+                    if isinstance(desc, list):
+                        desc = " ".join(str(item) for item in desc if item)
+                    
                     tech = proj.get("technologies") or proj.get("tech_stack") or ""
                     if isinstance(tech, list):
                         tech = " ".join(str(t) for t in tech)
-                    parts.append(f"{title} {desc} {tech}")
+                    elif not isinstance(tech, str):
+                        tech = str(tech) if tech else ""
+                    
+                    # Include full project description for quantification metrics
+                    project_text = f"{title} {desc} {tech}".strip()
+                    if project_text:
+                        parts.append(project_text)
 
             # Normalize: lowercase, remove extra spaces
             normalized = " ".join(parts).lower()
@@ -515,7 +676,7 @@ class ATSEngine:
                 continue
 
             # Check for action verbs in description/responsibilities
-            desc = str(exp.get("description") or exp.get("responsibilities") or exp.get("duties") or "").lower()
+            desc = safe_lower(exp.get("description") or exp.get("responsibilities") or exp.get("duties") or "")
             
             if desc:
                 # Count ALL action verbs found (not just first one)
@@ -706,7 +867,7 @@ class ATSEngine:
             return {"score": 0, "rationale": "No experience entries for consistency check"}
 
         # Extract job titles
-        titles = [str(e.get("job_title") or e.get("position") or e.get("title") or "").lower() for e in experience if isinstance(e, dict)]
+        titles = [safe_lower(e.get("job_title") or e.get("position") or e.get("title") or "") for e in experience if isinstance(e, dict)]
         titles = [t for t in titles if t]  # Filter empty titles
 
         if not titles:
@@ -808,12 +969,45 @@ class ATSEngine:
                 - missing_skills: List[str] - Required skills missing from CV
                 - matched_job_keywords: List[str] - Job keywords found in CV
         """
-        job_description = job_context.get("job_description", "").lower()
-        job_skills = [s.lower().strip() for s in job_context.get("job_skills", []) if s]
-        job_title = job_context.get("job_title", "").lower()
+        # Safely extract job description (handle both string and list)
+        job_desc_raw = job_context.get("job_description", "")
+        job_description = safe_lower(job_desc_raw)
+        
+        # Safely extract job skills (ensure all items are strings, handle nested lists)
+        job_skills_raw = job_context.get("job_skills", [])
+        job_skills = []
+        
+        if isinstance(job_skills_raw, str):
+            # If it's a string, try to split it
+            job_skills = [safe_lower(s).strip() for s in job_skills_raw.split(",") if s.strip()]
+        elif isinstance(job_skills_raw, list):
+            # Handle nested lists and ensure all items are strings
+            for item in job_skills_raw:
+                if item:  # Skip None/empty
+                    if isinstance(item, str):
+                        job_skills.append(safe_lower(item).strip())
+                    elif isinstance(item, list):
+                        # Handle nested lists
+                        for sub_item in item:
+                            if sub_item and isinstance(sub_item, str):
+                                job_skills.append(safe_lower(sub_item).strip())
+                            elif sub_item:
+                                job_skills.append(safe_lower(sub_item).strip())
+                    else:
+                        # Convert other types to string
+                        job_skills.append(safe_lower(item).strip())
+        else:
+            job_skills = []
+        
+        # Remove duplicates and empty strings
+        job_skills = list(set([s for s in job_skills if s]))
+        
+        # Safely extract job title (handle both string and list)
+        job_title_raw = job_context.get("job_title", "")
+        job_title = safe_lower(job_title_raw)
         
         # Combine all job text for keyword extraction
-        job_text = f"{job_title} {job_description}".lower()
+        job_text = safe_lower(f"{job_title} {job_description}")
         
         # Extract job keywords from description and title
         # Simple keyword extraction (can be enhanced with NLP)
@@ -855,51 +1049,78 @@ class ATSEngine:
         # Find missing required skills
         missing_skills = []
         cv_skills = self._extract_all_cv_skills(cv_data)
-        cv_skills_lower = [s.lower() for s in cv_skills]
+        cv_skills_lower = [safe_lower(s) for s in cv_skills]
         for skill in job_skills:
             # Check exact match or substring match
             if not any(skill in cv_skill or cv_skill in skill for cv_skill in cv_skills_lower):
                 missing_skills.append(skill)
         
         # Calculate relevance factor (0-1)
-        # IMPROVED: More lenient and realistic scoring
+        # FIXED: More granular scoring that differentiates between jobs
         
-        # 1. More lenient keyword relevance (30% match = full relevance instead of 50%)
-        # This means: 30% keyword match gives full credit, making scoring less strict
-        keyword_relevance = min(1.0, keyword_overlap_percentage / 30.0)  # Changed from 50.0 to 30.0
-        
-        # 2. More lenient skill relevance (don't penalize so harshly)
-        if job_skills:
-            # Calculate skill match percentage instead of just missing skills
-            matched_skills = len(job_skills) - len(missing_skills)
-            skill_match_percentage = (matched_skills / len(job_skills)) * 100 if job_skills else 100
-            # Use a curve: 50% skill match = 0.8 relevance (not 0.5), 100% = 1.0
-            # This gives partial credit for partial matches
-            skill_relevance = min(1.0, (skill_match_percentage / 50.0) * 0.8 + 0.2)
+        # 1. Keyword relevance - use a more gradual curve that doesn't cap at 1.0 too easily
+        # Scale: 0% = 0.0, 20% = 0.5, 40% = 0.75, 60% = 0.9, 80%+ = 1.0
+        if keyword_overlap_percentage >= 80:
+            keyword_relevance = 1.0
+        elif keyword_overlap_percentage >= 60:
+            keyword_relevance = 0.9
+        elif keyword_overlap_percentage >= 40:
+            keyword_relevance = 0.75
+        elif keyword_overlap_percentage >= 20:
+            keyword_relevance = 0.5
+        elif keyword_overlap_percentage >= 10:
+            keyword_relevance = 0.3
         else:
-            # If no job skills specified, don't penalize
-            skill_relevance = 1.0
+            keyword_relevance = keyword_overlap_percentage / 10.0 * 0.3  # Scale 0-10% to 0-0.3
+        
+        # 2. Skill relevance - more granular differentiation
+        if job_skills:
+            # Calculate skill match percentage
+            matched_skills = len(job_skills) - len(missing_skills)
+            skill_match_percentage = (matched_skills / len(job_skills)) * 100 if job_skills else 0
+            
+            # Scale: 0% = 0.2, 25% = 0.4, 50% = 0.6, 75% = 0.8, 100% = 1.0
+            if skill_match_percentage >= 100:
+                skill_relevance = 1.0
+            elif skill_match_percentage >= 75:
+                skill_relevance = 0.8
+            elif skill_match_percentage >= 50:
+                skill_relevance = 0.6
+            elif skill_match_percentage >= 25:
+                skill_relevance = 0.4
+            else:
+                skill_relevance = 0.2 + (skill_match_percentage / 25.0) * 0.2  # Scale 0-25% to 0.2-0.4
+        else:
+            # If no job skills specified, use keyword relevance only (don't give full credit)
+            skill_relevance = keyword_relevance * 0.8  # Slightly penalize for missing skill requirements
         
         # Combined relevance factor
         relevance_factor = (keyword_relevance * 0.6) + (skill_relevance * 0.4)
         
-        # 3. Ensure minimum relevance (even if match is poor, give some credit)
-        # This prevents scores from dropping to 0/100 for jobs that are somewhat relevant
-        # Minimum 15% relevance means worst case: 68 × 0.15 = ~10/100 (not 0/100)
-        relevance_factor = max(0.15, min(1.0, relevance_factor))
+        # 3. Ensure minimum relevance but keep it low for poor matches
+        # Minimum 10% relevance for very poor matches
+        relevance_factor = max(0.10, min(1.0, relevance_factor))
         
         # Calculate job-specific score
         # Job-specific score = Generic ATS score × Relevance factor
         # With minimum relevance, scores will be more realistic:
-        # - Very poor match: 68 × 0.15 = 10/100 (instead of 0/100)
-        # - Poor match: 68 × 0.4 = 27/100 (stays similar)
+        # - Very poor match: 68 × 0.10 = 7/100 (instead of 0/100)
+        # - Poor match: 68 × 0.3 = 20/100
+        # - Moderate match: 68 × 0.6 = 41/100
         # - Good match: 68 × 0.8 = 54/100
         # - Excellent match: 68 × 1.0 = 68/100
         job_specific_score = generic_ats_score * relevance_factor
         job_specific_score = max(0, min(100, int(job_specific_score)))
         
-        logger.info(f"[JOB-SPECIFIC ATS] Job keywords: {len(job_keywords)}, Matched: {keyword_overlap} ({keyword_overlap_percentage:.1f}%), "
-                   f"Missing skills: {len(missing_skills)}, Relevance: {relevance_factor:.2%}")
+        # Add small variation based on keyword overlap to ensure uniqueness
+        # This ensures even similar jobs get slightly different scores
+        keyword_bonus = min(2, keyword_overlap * 0.1)  # Max 2 point bonus
+        job_specific_score = min(100, int(job_specific_score + keyword_bonus))
+        
+        logger.info(f"[JOB-SPECIFIC ATS] Job: {job_context.get('job_title', 'Unknown')[:50]}, "
+                   f"Keywords: {len(job_keywords)}, Matched: {keyword_overlap} ({keyword_overlap_percentage:.1f}%), "
+                   f"Missing skills: {len(missing_skills)}, Relevance: {relevance_factor:.2%}, "
+                   f"Final Score: {job_specific_score}/100 (from generic {generic_ats_score})")
         
         return {
             "job_specific_score": job_specific_score,
@@ -911,26 +1132,95 @@ class ATSEngine:
         }
     
     def _extract_all_cv_skills(self, cv_data: Dict[str, Any]) -> List[str]:
-        """Extract all skills from CV in a flat list."""
+        """Extract all skills from CV in a flat list - handles multiple field name variations."""
         skills = []
         
-        # Extract from skills dict
-        skills_data = cv_data.get("skills", {}) or cv_data.get("personal_skills", {})
+        # Method 1: Extract from skills dict (most common)
+        skills_data = cv_data.get("skills", {}) or cv_data.get("personal_skills", {}) or {}
+        
         if isinstance(skills_data, dict):
+            # Check all possible skill category keys (case-insensitive)
             for key, value in skills_data.items():
+                key_lower = str(key).lower()
+                # Handle both list and string values
                 if isinstance(value, list):
-                    skills.extend([str(s) for s in value if s])
+                    skills.extend([str(s).strip() for s in value if s and str(s).strip()])
                 elif isinstance(value, str) and value.strip():
-                    skills.append(value.strip())
+                    # Handle comma-separated strings
+                    if ',' in value:
+                        skills.extend([s.strip() for s in value.split(',') if s.strip()])
+                    else:
+                        skills.append(value.strip())
         elif isinstance(skills_data, list):
-            skills.extend([str(s) for s in skills_data if s])
+            # Skills is a direct list
+            skills.extend([str(s).strip() for s in skills_data if s and str(s).strip()])
         
-        # Extract from other locations
-        for key in ["programming_languages", "frameworks", "tools", "platforms", "libraries"]:
+        # Method 2: Extract from json_content if CV data is nested
+        if not skills and isinstance(cv_data, dict):
+            json_content = cv_data.get("json_content", {})
+            if isinstance(json_content, dict):
+                json_skills = json_content.get("skills", {}) or json_content.get("personal_skills", {}) or {}
+                if isinstance(json_skills, dict):
+                    for key, value in json_skills.items():
+                        if isinstance(value, list):
+                            skills.extend([str(s).strip() for s in value if s and str(s).strip()])
+                        elif isinstance(value, str) and value.strip():
+                            if ',' in value:
+                                skills.extend([s.strip() for s in value.split(',') if s.strip()])
+                            else:
+                                skills.append(value.strip())
+        
+        # Method 3: Extract from normalized text (fallback - parse from experience/description)
+        if not skills:
+            normalized_text = self._normalize_cv_text(cv_data)
+            # Look for common skill patterns in text
+            import re
+            # Common tech skills patterns
+            tech_patterns = [
+                r'\b(python|java|javascript|react|node|sql|aws|docker|kubernetes|git|html|css|typescript|angular|vue)\b',
+                r'\b(machine learning|data science|cloud computing|web development|mobile development)\b'
+            ]
+            for pattern in tech_patterns:
+                matches = re.findall(pattern, normalized_text, re.IGNORECASE)
+                skills.extend([m.title() if m.islower() else m for m in matches])
+        
+        # Method 4: Extract from other common locations
+        for key in ["programming_languages", "frameworks", "tools", "platforms", "libraries", 
+                    "technical_skills", "job_related_skills", "computer_skills", "programming_skills",
+                    "technical", "soft_skills", "social_skills", "languages", "certifications"]:
             if key in cv_data and isinstance(cv_data[key], list):
-                skills.extend([str(s) for s in cv_data[key] if s])
+                skills.extend([str(s).strip() for s in cv_data[key] if s and str(s).strip()])
+            elif key in cv_data and isinstance(cv_data[key], str):
+                if ',' in cv_data[key]:
+                    skills.extend([s.strip() for s in cv_data[key].split(',') if s.strip()])
+                else:
+                    skills.append(cv_data[key].strip())
         
-        return [s.strip() for s in skills if s and s.strip()]
+        # Method 5: Extract from experience descriptions (look for skill mentions)
+        experience = cv_data.get("experience", []) or cv_data.get("work_experience", [])
+        for exp in experience:
+            if isinstance(exp, dict):
+                desc = exp.get("description", "") or exp.get("responsibilities", "") or exp.get("duties", "")
+                if desc:
+                    # Look for common skill keywords in descriptions
+                    import re
+                    skill_keywords = ["python", "java", "javascript", "react", "sql", "aws", "docker", 
+                                     "kubernetes", "git", "html", "css", "node", "angular", "vue"]
+                    desc_lower = safe_lower(desc)
+                    for keyword in skill_keywords:
+                        if keyword in desc_lower and keyword.title() not in skills:
+                            skills.append(keyword.title())
+        
+        # Deduplicate and return
+        unique_skills = []
+        seen = set()
+        for skill in skills:
+            skill_lower = safe_lower(skill).strip()
+            if skill_lower and skill_lower not in seen:
+                unique_skills.append(skill.strip())
+                seen.add(skill_lower)
+        
+        return unique_skills
 
     def _generate_feedback(self, cv_data: Dict[str, Any], normalized_text: str, components: Dict[str, Any], ats_score: int) -> Tuple[List[Dict], List[str]]:
         """Generate ATS issues and recommendations."""
