@@ -6,7 +6,7 @@ steps:
     id: 'build-frontend'
     args: ['build', '-t', 'africa-south1-docker.pkg.dev/$PROJECT_ID/trustbridge/frontend:latest',
            '--build-arg', 'NEXT_PUBLIC_API_URL=https://trustbridge-backend-406475861578.africa-south1.run.app',
-           '--build-arg', 'NEXT_PUBLIC_PRIVY_APP_ID=cmive70p0e6gu13kd2e4x1g1x',
+           '--build-arg', 'NEXT_PUBLIC_PRIVY_APP_ID=cmive70p803a6i90d7zu0kmou',
            '--build-arg', 'NEXT_PUBLIC_PRIVY_CLIENT_ID=client-WY6TQ3apwbdivAKHjNHBNxmWs8z2ZHJ3SqWwuD6G4pyVP',
            './frontend']
   - name: 'gcr.io/cloud-builders/docker'
