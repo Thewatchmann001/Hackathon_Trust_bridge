@@ -195,7 +195,7 @@ export default function Login() {
       }
       
       // GUARD 2: Never call login() if already authenticated
-      if (privyAuth?.authenticated && privyAuth?.user) {
+      if (privyAuth?.authenticated && privyAuth?.user && isAuthenticated) {
         // User is authenticated but trying to switch roles - force logout first
         toast.error("You are already signed in. Please logout first to switch roles.");
         setPrivyLoading(false);
@@ -349,13 +349,13 @@ export default function Login() {
               }}
               className="input-field w-full"
               required
-              disabled={privyAuth?.authenticated && !authError}
+              disabled={privyAuth?.authenticated && isAuthenticated && !authError}
             >
               <option value="student">Job Seeker</option>
               <option value="founder">Startup</option>
               <option value="investor">Investor</option>
             </select>
-            {privyAuth?.authenticated && !authError && (
+            {privyAuth?.authenticated && isAuthenticated && !authError && (
               <p className="text-xs text-amber-600 mt-1 font-medium">
                 ⚠️ You are already signed in. Please logout to change your role.
               </p>
