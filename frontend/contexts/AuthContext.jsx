@@ -67,9 +67,8 @@ export const AuthProvider = ({ children }) => {
           const email = privyUser.email?.address || privyUser.linkedAccounts?.find(acc => acc.type === 'email')?.address;
           
           if (!email) {
-            console.warn('⚠️ No email found in Privy user, cannot sync');
-            setLoading(false);
-            return;
+            console.warn('⚠️ No email found in Privy user, using privy ID as fallback');
+            email = privyUser.id + '@privy.user';
           }
 
           // Get Solana wallet from Privy
