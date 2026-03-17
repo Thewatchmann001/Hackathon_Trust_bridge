@@ -68,7 +68,7 @@ export const AuthProvider = ({ children }) => {
           
           if (!email) {
             console.warn('⚠️ No email found in Privy user, using privy ID as fallback');
-            email = privyUser.id + '@privy.user';
+            email = privyUser.id.replace(/[^a-zA-Z0-9]/g, '') + '@privy.user';
           }
 
           // Get Solana wallet from Privy
