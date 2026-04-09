@@ -30,14 +30,14 @@ export default function Home() {
       color: "from-sky-500 to-sky-600",
       gradient: "career-gradient",
     },
-    {
+    /* {
       icon: TrendingUp,
       title: "Invest in Verified Startups",
       description:
-        "Blockchain-verified startups. Zero remittance fees. Transparent credibility scoring. Direct diaspora investment.",
+        "Blockchain-verified startups. Zero remittance fees. Transparent credibility scoring. Direct investment.",
       color: "from-amber-500 to-amber-600",
       gradient: "investment-gradient",
-    },
+    }, */
     {
       icon: Shield,
       title: "Trust Through Technology",
@@ -50,19 +50,19 @@ export default function Home() {
       icon: Sparkles,
       title: "Smart Connections",
       description:
-        "AI-powered matching for jobs and investments. Personalized recommendations. Data-driven decisions.",
+        "AI-powered matching for jobs. Personalized recommendations. Data-driven decisions.",
       color: "from-violet-500 to-violet-600",
       gradient: "career-gradient",
     },
   ];
 
   const benefits = [
-    "Zero remittance fees with USDC stablecoins",
+    /* "Zero remittance fees with USDC stablecoins",
     "Currency risk eliminated",
-    "Transparent credibility scoring",
+    "Transparent credibility scoring", */
     "Blockchain-verified credentials",
     "AI-powered job matching",
-    "Direct diaspora investment",
+    /* "Direct investment", */
   ];
 
   const steps = [
@@ -82,19 +82,19 @@ export default function Home() {
       image: "/images/backgrounds/how-it-works/step-2-match.jpg",
       color: "from-violet-500 to-violet-600",
     },
-    {
+    /* {
       step: 3,
       title: "Invest & Grow",
       description: "Discover startups → Verify credibility → Invest with USDC",
       icon: TrendingUp,
       image: "/images/backgrounds/how-it-works/step-3-invest.jpg",
       color: "from-amber-500 to-sky-600",
-    },
+    }, */
   ];
 
   const stats = [
     { value: "90%+", label: "ATS Score Improvement", icon: BarChart3 },
-    { value: "Zero", label: "Remittance Fees", icon: Shield },
+    /* { value: "Zero", label: "Remittance Fees", icon: Shield }, */
     { value: "100%", label: "Blockchain Verified", icon: CheckCircle },
     { value: "Global", label: "Job Opportunities", icon: Globe },
   ];
@@ -134,7 +134,7 @@ export default function Home() {
               transition={{ duration: 0.8, delay: 0.2 }}
               className="text-5xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight text-white"
             >
-              Bridge Your Career & Connect To Diaspora
+              Bridge Your Career To Success
             </motion.h1>
             <motion.p
               initial={{ opacity: 0, y: 20 }}
@@ -142,7 +142,7 @@ export default function Home() {
               transition={{ duration: 0.8, delay: 0.4 }}
               className="text-xl md:text-2xl mb-10 text-white font-semibold leading-relaxed"
             >
-              The platform where career building meets diaspora investment. Optimize your CV with AI, land your dream job, then invest in verified startups all in one place.
+              Optimize your CV with AI and land your dream job with intelligent matching.
             </motion.p>
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -157,13 +157,13 @@ export default function Home() {
                 Start Building Your CV
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </Link>
-              <Link
+              {/* <Link
                 href="/investor-platform"
                 className="btn-emerald inline-flex items-center gap-2 group"
               >
                 Explore Investments
                 <TrendingUp className="w-5 h-5 group-hover:scale-110 transition-transform" />
-              </Link>
+              </Link> */}
             </motion.div>
           </motion.div>
         </div>
@@ -180,10 +180,10 @@ export default function Home() {
             className="text-center mb-16"
           >
             <h2 className="text-4xl md:text-5xl font-bold text-slate-900 mb-4">
-              Two Platforms, One Mission: Your Success
+              Your Career, Accelerated by AI
             </h2>
             <p className="text-xl text-slate-600 max-w-3xl mx-auto">
-              From CV optimization to startup investment—everything you need to build your career and grow your wealth.
+              Everything you need to build a professional CV and match with global opportunities.
             </p>
           </motion.div>
 
@@ -228,15 +228,15 @@ export default function Home() {
             className="text-center mb-16"
           >
             <h2 className="text-4xl md:text-5xl font-bold text-slate-900 mb-4">
-              From CV to Investment: Your Journey
+              How It Works
             </h2>
             <p className="text-xl text-slate-600 max-w-3xl mx-auto">
-              A simple three-step process to transform your career and start investing.
+              A simple process to transform your career.
             </p>
           </motion.div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {steps.map((item, index) => {
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {steps.filter(s => s.step !== 3).map((item, index) => {
               const Icon = item.icon;
               return (
                 <motion.div
@@ -359,7 +359,7 @@ export default function Home() {
             transition={{ duration: 0.8, delay: 0.2 }}
             className="text-xl mb-10 text-slate-200 leading-relaxed"
           >
-            Join thousands building careers and investing in verified startups.
+            Join thousands building successful careers.
           </motion.p>
           <motion.div
             initial={{ opacity: 0, y: 20 }}

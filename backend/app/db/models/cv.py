@@ -15,7 +15,14 @@ class CV(Base):
     original_file_name = Column(String(255), nullable=True)  # Original filename
     
     # ========== PARSED DATA ==========
-    json_content = Column(JSON, nullable=False)  # Full CV data as JSON (parsed from original)
+    json_content = Column(JSON, nullable=True)  # Full CV data as JSON (parsed from original)
+    personal_info = Column(JSON, nullable=True)
+    summary = Column(String, nullable=True)
+    work_experience = Column(JSON, nullable=True) # JSON array
+    education = Column(JSON, nullable=True) # JSON array
+    skills = Column(JSON, nullable=True)
+    certifications = Column(JSON, nullable=True)
+    template_name = Column(String(50), nullable=True)
     
     # ========== ATS ANALYSIS ==========
     ats_score = Column(Float, nullable=True)  # Overall ATS score (0-100)

@@ -1,767 +1,519 @@
-/**
- * AI CV Builder Page with Sidebar Navigation
- * All features accessible via sidebar, except Job Match
- */
 import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useRouter } from "next/router";
-import StepperUI from "../cv-builder/StepperUI";
-import CVEditor from "../cv-builder/CVEditor";
-import CVSuggestions from "../cv-builder/CVSuggestions";
-import JobList from "../components/JobList";
-import EuropassCVWizard from "../components/cv-builder/EuropassCVWizard";
-import GuidedCVWizard from "../components/cv-builder/GuidedCVWizard";
-import JobMatcher from "../components/cv-builder/JobMatcher";
-import CoverLetterGenerator from "../components/cv-builder/CoverLetterGenerator";
-import InterviewPrep from "../components/cv-builder/InterviewPrep";
-import ATSScoreDisplay from "../components/cv-builder/ATSScoreDisplay";
-import ATSOptimizer from "../components/cv-builder/ATSOptimizer";
-import CVExporter from "../components/cv-builder/CVExporter";
-import JobApplicationTracker from "../components/cv-builder/JobApplicationTracker";
-import QuickUpload from "../components/cv-builder/QuickUpload";
-import ProposalWriter from "../components/ProposalWriter";
-import BackgroundImage from "../components/BackgroundImage";
+import { cvAPI } from "../lib/api";
 import toast from "react-hot-toast";
 import {
-  FileText,
-  Search,
-  MessageSquare,
-  FileCheck,
-  Download,
-  UserPlus,
-  Briefcase,
-  Menu,
-  X,
-  Sparkles,
-  Upload,
-  Trash2,
-  PenTool,
+  User, FileText, Briefcase, GraduationCap,
+  Wand2, Download, Upload, Layout, ChevronRight, ChevronLeft,
+  Plus, Trash2, CheckCircle2
 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import Logo from "../components/Logo";
 
-// Helper function to extract keywords from CV
-// Uses the SAME logic as backend upload_linkedin_pdf to ensure consistency
-function extractKeywordsFromCV(cvData) {
-  if (!cvData) return [];
-
-  const keywords = [];
-
-  // Handle both json_content structure and direct structure
-  const content = cvData.json_content || cvData;
-
-  // STEP 1: Extract technical skills (same as backend)
-  const skills = content.personal_skills || content.skills || {};
-
-  if (skills.job_related_skills && Array.isArray(skills.job_related_skills)) {
-    keywords.push(...skills.job_related_skills.slice(0, 5));
-  }
-  if (skills.computer_skills && Array.isArray(skills.computer_skills)) {
-    keywords.push(...skills.computer_skills.slice(0, 5));
-  }
-  if (skills.technical && Array.isArray(skills.technical)) {
-    keywords.push(...skills.technical.slice(0, 5));
-  }
-  if (skills.technical_skills && Array.isArray(skills.technical_skills)) {
-    keywords.push(...skills.technical_skills.slice(0, 5));
-  }
-  if (skills.programming_skills && Array.isArray(skills.programming_skills)) {
-    keywords.push(...skills.programming_skills.slice(0, 5));
-  }
-
-  // STEP 2: Extract job titles from experience (NOT company names or event names)
-  // Only extract actual job titles, filter out event names, competitions, etc.
-  const experience = content.work_experience || content.experience || [];
-  if (Array.isArray(experience)) {
-    experience.forEach((exp) => {
-      const jobTitle = exp.job_title || exp.position;
-      if (jobTitle) {
-        // Filter out event names, competitions, hackathons
-        const titleLower = jobTitle.toLowerCase();
-        const isEvent =
-          titleLower.includes("hackathon") ||
-          titleLower.includes("competition") ||
-          titleLower.includes("participant") ||
-          titleLower.includes("winner") ||
-          titleLower.includes("event");
-
-        // Only add if it's a real job title (contains common job keywords)
-        const isJobTitle =
-          titleLower.includes("developer") ||
-          titleLower.includes("engineer") ||
-          titleLower.includes("programmer") ||
-          titleLower.includes("analyst") ||
-          titleLower.includes("manager") ||
-          titleLower.includes("specialist") ||
-          titleLower.includes("consultant") ||
-          titleLower.includes("architect") ||
-          titleLower.includes("designer") ||
-          titleLower.includes("scientist");
-
-        if (!isEvent && (isJobTitle || jobTitle.length > 10)) {
-          keywords.push(jobTitle);
-        }
-      }
-    });
-  }
-
-  // STEP 3: Extract from summary (same as backend)
-  const summary = content.summary || "";
-  if (summary) {
-    // Extract key terms from summary (simple approach - same as backend)
-    const summaryWords = summary.split(/\s+/).filter((w) => w.length > 4);
-    keywords.push(...summaryWords.slice(0, 10));
-  }
-
-  // Remove duplicates and filter out empty strings
-  const uniqueKeywords = [
-    ...new Set(keywords.filter((k) => k && k.trim().length > 0)),
-  ];
-
-  // If still no keywords, use default tech keywords (same as backend)
-  if (uniqueKeywords.length === 0) {
-    return ["software", "developer", "engineer", "technology"];
-  }
-
-  return uniqueKeywords.slice(0, 10);
-}
-
-// Helper function to extract job titles from CV
-// Only extracts actual job titles, filters out events/competitions
-function extractJobTitlesFromCV(cvData) {
-  if (!cvData) return [];
-
-  const titles = [];
-
-  // Handle both json_content structure and direct structure
-  const content = cvData.json_content || cvData;
-
-  // Extract from work experience - handle multiple formats
-  const experience = content.work_experience || content.experience || [];
-  if (Array.isArray(experience)) {
-    experience.forEach((exp) => {
-      const jobTitle = exp.job_title || exp.position;
-      if (jobTitle) {
-        // Filter out event names, competitions, hackathons
-        const titleLower = jobTitle.toLowerCase();
-        const isEvent =
-          titleLower.includes("hackathon") ||
-          titleLower.includes("competition") ||
-          titleLower.includes("participant") ||
-          titleLower.includes("winner") ||
-          titleLower.includes("event");
-
-        // Only add if it's a real job title
-        const isJobTitle =
-          titleLower.includes("developer") ||
-          titleLower.includes("engineer") ||
-          titleLower.includes("programmer") ||
-          titleLower.includes("analyst") ||
-          titleLower.includes("manager") ||
-          titleLower.includes("specialist") ||
-          titleLower.includes("consultant") ||
-          titleLower.includes("architect") ||
-          titleLower.includes("designer") ||
-          titleLower.includes("scientist");
-
-        if (!isEvent && (isJobTitle || jobTitle.length > 10)) {
-          titles.push(jobTitle);
-        }
-      }
-    });
-  }
-
-  return [...new Set(titles.filter((t) => t && t.trim().length > 0))].slice(
-    0,
-    5
-  );
-}
-
-// Sidebar menu items
-const SIDEBAR_ITEMS = [
-  {
-    id: "quick-upload",
-    label: "Quick Upload",
-    icon: Upload,
-    alwaysVisible: true,
-  },
-  { id: "wizard", label: "Create CV", icon: UserPlus, alwaysVisible: true },
-  { id: "editor", label: "Edit CV", icon: FileText, requiresCV: true },
-  {
-    id: "cover-letter",
-    label: "Cover Letter",
-    icon: MessageSquare,
-    requiresCV: false,
-  },
-  {
-    id: "proposal",
-    label: "Proposal Writer",
-    icon: PenTool,
-    requiresCV: false,
-  },
-  {
-    id: "interview",
-    label: "Interview Prep",
-    icon: MessageSquare,
-    requiresCV: false,
-  },
-  { id: "ats", label: "ATS Optimizer", icon: FileCheck, requiresCV: false },
-  { id: "export", label: "Export CV", icon: Download, requiresCV: false },
-  { id: "tracker", label: "Applications", icon: Briefcase, requiresCV: false },
-];
-
-export default function CVBuilderPage() {
+export default function CVBuilder() {
   const { user } = useAuth();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState("wizard");
-  const [currentStep, setCurrentStep] = useState(1);
-  const [cvData, setCvData] = useState(null);
+  const [step, setStep] = useState(1);
+  const [cvData, setCvData] = useState({
+    personal_info: {
+      full_name: "",
+      email: "",
+      phone: "",
+      location: "",
+      linkedin: "",
+      portfolio: "",
+      photo_url: ""
+    },
+    summary: "",
+    work_experience: [],
+    education: [],
+    skills: {
+      technical: [],
+      soft: [],
+      languages: []
+    },
+    certifications: [],
+    template_name: "Modern"
+  });
   const [loading, setLoading] = useState(false);
-  const [suggestions, setSuggestions] = useState({});
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [showJobMatch, setShowJobMatch] = useState(false);
-
-  // Check if CV exists - simpler check: if cvData exists and has content
-  const hasCV =
-    cvData &&
-    (cvData.id ||
-      (cvData.json_content && Object.keys(cvData.json_content).length > 0) ||
-      (cvData.summary && cvData.summary.length > 0) ||
-      (cvData.personal_info && Object.keys(cvData.personal_info).length > 0));
 
   useEffect(() => {
     if (!user) {
       router.push("/login");
       return;
     }
-    fetchCV();
+    loadExistingCV();
   }, [user]);
 
-  const fetchCV = async () => {
-    if (!user?.id) return;
-    setLoading(true);
+  const loadExistingCV = async () => {
     try {
-      const apiUrl =
-        process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000";
-      const response = await fetch(`${apiUrl}/api/cv/${user.id}`);
-      if (response.ok) {
-        const data = await response.json();
-        console.log("[CV Builder] Fetched CV data:", {
-          id: data.id,
-          hasJsonContent: !!data.json_content,
-          jsonContentKeys: data.json_content ? Object.keys(data.json_content) : [],
-          personalInfo: data.json_content?.personal_info,
-          summary: data.summary || data.json_content?.summary,
-          skills: data.json_content?.personal_skills
-        });
-        setCvData(data);
-        if (data && data.id) {
-          setActiveTab("editor");
-        }
-      } else if (response.status === 404) {
-        console.log("[CV Builder] No CV found for user");
-        setCvData(null);
-        setActiveTab("wizard");
+      const response = await cvAPI.getMe();
+      if (response.data) {
+        setCvData(response.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch CV:", error);
-      toast.error("Failed to load CV. Please try again.");
-      setCvData(null);
-      setActiveTab("wizard");
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      console.log("No existing CV found or error loading");
     }
   };
 
   const handleSave = async () => {
-    if (!user?.id) return;
     setLoading(true);
     try {
-      toast.success("CV saved successfully!");
-    } catch (error) {
+      await cvAPI.save(cvData);
+      toast.success("CV Saved Successfully!");
+    } catch (err) {
       toast.error("Failed to save CV");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleUpdate = (updatedData) => {
-    setCvData(updatedData);
-  };
-
-  const handleApplySuggestion = (suggestion) => {
-    toast.success("Suggestion applied!");
-  };
-
-  if (!user) {
-    return <div>Loading...</div>;
-  }
-
-  const handleWizardComplete = async (savedCv) => {
+  const handleExport = async () => {
     try {
-      const apiUrl =
-        process.env.NEXT_PUBLIC_API_URL || "http://192.168.100.93:8000";
-      const response = await fetch(`${apiUrl}/api/cv/${user.id}`);
-      if (response.ok) {
-        const fullCv = await response.json();
-        setCvData(fullCv);
-        setActiveTab("editor");
-        toast.success("CV created and saved! You can now use all features.");
-      } else {
-        setCvData(savedCv);
-        setActiveTab("editor");
-        toast.success("CV created and saved!");
-      }
-    } catch (error) {
-      setCvData(savedCv);
-      setActiveTab("editor");
-      toast.success("CV created and saved!");
+      const response = await cvAPI.exportPDF(cvData);
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'my-cv.pdf');
+      document.body.appendChild(link);
+      link.click();
+    } catch (err) {
+      toast.error("Failed to export PDF");
     }
   };
 
-  // Show all sidebar items, but disable CV-dependent ones if no CV exists
-  const visibleSidebarItems = SIDEBAR_ITEMS;
-
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case "quick-upload":
-        return (
-          <QuickUpload
-            onComplete={async (result) => {
-              try {
-                // Fetch the saved CV to ensure we have the latest data
-                await fetchCV();
-
-                // If CV was saved successfully, set active tab
-                if (cvData || result) {
-                  setActiveTab("editor");
-                  setShowJobMatch(false); // Don't auto-show job match - let user click the button
-
-                  // Show success message with job match count
-                  const matchCount =
-                    result?.match_count || result?.job_matches?.length || 0;
-                  const atsScore = result?.ats_score || "N/A";
-                  toast.success(
-                    `CV saved! ATS Score: ${atsScore}% | Found ${matchCount} job matches`
-                  );
-                } else {
-                  toast.error("Failed to load CV. Please try again.");
-                }
-              } catch (error) {
-                console.error("Error completing CV upload:", error);
-                toast.error("Failed to load CV. Please refresh the page.");
-              }
-            }}
-            onCancel={() => {
-              setActiveTab("wizard");
-            }}
-          />
-        );
-
-      case "wizard":
-        return (
-          <GuidedCVWizard
-            onComplete={handleWizardComplete}
-            onCancel={() => {
-              if (hasCV) {
-                setActiveTab("editor");
-              } else {
-                toast("Please complete the CV creation wizard first", {
-                  icon: "ℹ️",
-                });
-              }
-            }}
-            userId={user?.id}
-          />
-        );
-
-      case "editor":
-        if (!hasCV) {
-          return (
-            <div className="card p-6 text-center">
-              <p className="text-gray-600 mb-4">
-                No CV found. Please create one first.
-              </p>
-              <button
-                onClick={() => setActiveTab("wizard")}
-                className="btn-primary"
-              >
-                Create CV
-              </button>
-            </div>
-          );
-        }
-        return (
-          <>
-            <StepperUI
-              currentStep={currentStep}
-              onStepChange={setCurrentStep}
-              cvData={cvData}
-              onUpdate={handleUpdate}
-            />
-            <div className="mt-8">
-              {currentStep <= 5 ? (
-                <CVEditor
-                  cvData={cvData}
-                  onSave={handleSave}
-                  onUpdate={handleUpdate}
-                />
-              ) : (
-                <div className="card">
-                  <h2 className="text-2xl font-bold mb-4">Review Your CV</h2>
-                  {cvData && (
-                    <div className="bg-white rounded-lg shadow p-6 mb-6">
-                      <pre className="whitespace-pre-wrap text-sm">
-                        {JSON.stringify(cvData, null, 2)}
-                      </pre>
-                    </div>
-                  )}
-                  <div className="flex gap-4">
-                    <button
-                      onClick={handleSave}
-                      className="btn-primary"
-                      disabled={loading}
-                    >
-                      {loading ? "Saving..." : "Save CV"}
-                    </button>
-                    <button
-                      onClick={() => setCurrentStep(1)}
-                      className="btn-secondary"
-                    >
-                      Edit CV
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-            {suggestions && Object.keys(suggestions).length > 0 && (
-              <CVSuggestions
-                suggestions={suggestions}
-                onApply={handleApplySuggestion}
-                onDismiss={() => setSuggestions({})}
-              />
-            )}
-          </>
-        );
-
-      case "cover-letter":
-        if (!hasCV) {
-          return (
-            <div className="card p-6 text-center">
-              <p className="text-gray-600 mb-4">Please create a CV first.</p>
-              <button
-                onClick={() => setActiveTab("wizard")}
-                className="btn-primary"
-              >
-                Create CV
-              </button>
-            </div>
-          );
-        }
-        return <CoverLetterGenerator cvData={cvData} userId={user?.id} />;
-
-      case "proposal":
-        return <ProposalWriter jobData={null} />;
-
-      case "interview":
-        if (!hasCV) {
-          return (
-            <div className="card p-6 text-center">
-              <p className="text-gray-600 mb-4">Please create a CV first.</p>
-              <button
-                onClick={() => setActiveTab("wizard")}
-                className="btn-primary"
-              >
-                Create CV
-              </button>
-            </div>
-          );
-        }
-        return <InterviewPrep cvData={cvData} userId={user?.id} />;
-
-      case "ats":
-        if (!hasCV) {
-          return (
-            <div className="card p-6 text-center">
-              <p className="text-gray-600 mb-4">Please create a CV first.</p>
-              <button
-                onClick={() => setActiveTab("wizard")}
-                className="btn-primary"
-              >
-                Create CV
-              </button>
-            </div>
-          );
-        }
-        return <ATSScoreDisplay cvData={cvData} userId={user?.id} />;
-
-      case "export":
-        if (!hasCV) {
-          return (
-            <div className="card p-6 text-center">
-              <p className="text-gray-600 mb-4">Please create a CV first.</p>
-              <button
-                onClick={() => setActiveTab("wizard")}
-                className="btn-primary"
-              >
-                Create CV
-              </button>
-            </div>
-          );
-        }
-        return <CVExporter cvData={cvData} userId={user?.id} />;
-
-      case "tracker":
-        return <JobApplicationTracker userId={user?.id} />;
-
-      default:
-        return (
-          <div className="card p-6 text-center">
-            <p className="text-gray-600">Select a feature from the sidebar</p>
-          </div>
-        );
+  const handleAIEnhance = async (section, content) => {
+    try {
+      const response = await cvAPI.aiEnhance({ section, content });
+      return response.data.enhanced_content;
+    } catch (err) {
+      toast.error("AI Enhancement failed");
+      return content;
     }
   };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append("file", file);
+    setLoading(true);
+    try {
+      const response = await cvAPI.uploadParse(formData);
+      setCvData(prev => ({ ...prev, ...response.data }));
+      toast.success("CV Parsed Successfully!");
+    } catch (err) {
+      toast.error("Failed to parse CV");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const nextStep = () => setStep(s => Math.min(s + 1, 7));
+  const prevStep = () => setStep(s => Math.max(s - 1, 1));
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Header Section with Background */}
-      <BackgroundImage
-        src="/images/backgrounds/hero/cv-builder-hero.jpg"
-        alt="CV Builder - TrustBridge"
-        overlay="default"
-        className="h-64 flex-shrink-0"
-        priority={true}
-      >
-        <div className="max-w-7xl mx-auto px-6 py-12 h-full flex items-end">
-          <div>
-            <h1 className="text-4xl md:text-5xl font-bold text-white mb-3">
-              AI-Powered CV Builder
-            </h1>
-            <p className="text-xl text-white font-semibold max-w-3xl">
-              Build a CV that gets you hired. AI-powered optimization, ATS compatibility, and global job matching—all in one place.
-            </p>
-          </div>
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      <header className="bg-white border-b px-6 py-4 flex justify-between items-center sticky top-0 z-10">
+        <Logo />
+        <div className="flex items-center gap-4">
+          <button onClick={handleSave} className="btn-secondary flex items-center gap-2">
+            <FileText size={18} /> Save Draft
+          </button>
+          <button onClick={handleExport} className="btn-primary flex items-center gap-2">
+            <Download size={18} /> Export PDF
+          </button>
         </div>
-      </BackgroundImage>
+      </header>
 
-      {/* Main Layout */}
-      <div className="flex flex-1 overflow-hidden">
-      {/* Sidebar */}
-      <aside
-        className={`${
-          sidebarOpen ? "w-64" : "w-0"
-        } transition-all duration-300 bg-white border-r border-slate-200 flex-shrink-0 overflow-hidden`}
-      >
-        <div className="h-full flex flex-col">
-          {/* Sidebar Header */}
-          <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-            <h2 className="text-lg font-bold text-slate-900">CV Builder</h2>
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              <X className="w-5 h-5 text-gray-600" />
-            </button>
-          </div>
-
-          {/* Sidebar Menu */}
-          <nav className="flex-1 overflow-y-auto p-4">
-            <ul className="space-y-2">
-              {visibleSidebarItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = activeTab === item.id;
-                const isDisabled = item.requiresCV && !hasCV;
-                return (
-                  <li key={item.id}>
-                    <button
-                      onClick={() => {
-                        if (isDisabled) {
-                          toast(
-                            "Please create a CV first to use this feature",
-                            { icon: "ℹ️" }
-                          );
-                          setActiveTab("wizard");
-                        } else {
-                          setActiveTab(item.id);
-                        }
-                      }}
-                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${
-                        isActive
-                          ? "bg-gradient-to-r from-sky-500 to-violet-500 text-white shadow-lg"
-                          : isDisabled
-                          ? "text-slate-400 cursor-not-allowed opacity-60"
-                          : "text-slate-700 hover:bg-sky-50 hover:text-sky-700"
-                      }`}
-                      disabled={isDisabled}
-                      title={isDisabled ? "Create a CV first" : ""}
-                    >
-                      <Icon className="w-5 h-5" />
-                      <span>{item.label}</span>
-                      {isDisabled && (
-                        <span className="ml-auto text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded">
-                          Locked
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-
-            {/* CV Preview - Removed */}
-
-            {/* Delete CV Button */}
-            <div className="mt-4 pt-4 border-t border-gray-200">
+      <div className="flex-1 flex overflow-hidden">
+        {/* Sidebar Navigation */}
+        <aside className="w-64 bg-white border-r p-4 hidden md:block">
+          <nav className="space-y-1">
+            {[
+              { id: 1, label: "Personal Info", icon: User },
+              { id: 2, label: "Summary", icon: FileText },
+              { id: 3, label: "Work Experience", icon: Briefcase },
+              { id: 4, label: "Education", icon: GraduationCap },
+              { id: 5, label: "Skills", icon: Wand2 },
+              { id: 6, label: "Certifications", icon: CheckCircle2 },
+              { id: 7, label: "Template", icon: Layout },
+            ].map(i => (
               <button
-                onClick={async () => {
-                  if (
-                    confirm(
-                      "Are you sure you want to delete your CV? This action cannot be undone."
-                    )
-                  ) {
-                    try {
-                      setLoading(true);
-                      const apiUrl =
-                        process.env.NEXT_PUBLIC_API_URL ||
-                        "http://192.168.100.93:8000";
-                      const response = await fetch(
-                        `${apiUrl}/api/cv/${user.id}`,
-                        {
-                          method: "DELETE",
-                        }
-                      );
-
-                      if (response.ok) {
-                        setCvData(null);
-                        setActiveTab("wizard");
-                        toast.success("CV deleted successfully");
-                      } else {
-                        const error = await response.json();
-                        toast.error(error.detail || "Failed to delete CV");
-                      }
-                    } catch (error) {
-                      console.error("Delete CV error:", error);
-                      toast.error("Failed to delete CV");
-                    } finally {
-                      setLoading(false);
-                    }
-                  }
-                }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
-                disabled={loading}
+                key={i.id}
+                onClick={() => setStep(i.id)}
+                className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  step === i.id ? "bg-blue-50 text-blue-600" : "text-gray-600 hover:bg-gray-50"
+                }`}
               >
-                <Trash2 className="w-4 h-4" />
-                Delete CV
+                <i.icon size={18} />
+                {i.label}
               </button>
-            </div>
-
-            {/* Job Match Button - Not in sidebar but accessible */}
-            {hasCV && (
-              <div className="mt-6 pt-6 border-t border-slate-200">
-                <button
-                  onClick={() => setShowJobMatch(!showJobMatch)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all ${
-                    showJobMatch
-                      ? "bg-gradient-to-r from-sky-500 to-sky-600 text-white shadow-lg"
-                      : "text-slate-700 hover:bg-sky-50 hover:text-sky-700 border-2 border-sky-200"
-                  }`}
-                >
-                  <Search className="w-5 h-5" />
-                  <span>Job Match</span>
-                </button>
-              </div>
-            )}
+            ))}
           </nav>
-        </div>
-      </aside>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Bar - Simplified (header now in hero section) */}
-        <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between">
-          <div>
-            <p className="text-sm text-slate-600">
-              {activeTab === "wizard" &&
-                "Create your professional CV step-by-step"}
-              {activeTab === "editor" && "Edit and refine your CV"}
-              {activeTab === "cover-letter" &&
-                "Generate personalized cover letters"}
-              {activeTab === "interview" && "Prepare for interviews with AI"}
-              {activeTab === "ats" && "Optimize your CV for ATS systems"}
-              {activeTab === "export" && "Export your CV in multiple formats"}
-              {activeTab === "tracker" && "Track your job applications"}
-            </p>
+          <div className="mt-8 pt-8 border-t">
+             <label className="block text-xs font-semibold text-gray-500 uppercase mb-4">Import Existing</label>
+             <div className="relative group">
+                <input type="file" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
+                <div className="border-2 border-dashed rounded-lg p-4 text-center group-hover:border-blue-400 transition-colors">
+                  <Upload className="mx-auto text-gray-400 mb-2" />
+                  <span className="text-xs text-gray-600">Upload PDF/DOCX</span>
+                </div>
+             </div>
           </div>
-          {!sidebarOpen && (
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-            >
-              <Menu className="w-6 h-6 text-slate-600" />
-            </button>
-          )}
-        </div>
+        </aside>
 
-        {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-6">
-          {/* Job Match Section - Shows when toggled */}
-          {showJobMatch && hasCV && (
-            <div className="mb-6">
-              <div className="card p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-                    <Search className="w-6 h-6 text-sky-600" />
-                    Job Matches for Your CV
-                  </h2>
-                  <button
-                    onClick={() => setShowJobMatch(false)}
-                    className="text-slate-500 hover:text-slate-700"
-                  >
-                    <X className="w-5 h-5" />
+        {/* Form Area */}
+        <main className="flex-1 overflow-y-auto p-8">
+          <div className="max-w-3xl mx-auto">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={step}
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-6"
+              >
+                {step === 1 && (
+                  <section className="space-y-4">
+                    <h2 className="text-2xl font-bold">Personal Information</h2>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="col-span-2">
+                        <label className="label">Full Name</label>
+                        <input
+                          type="text"
+                          className="input"
+                          value={cvData.personal_info.full_name}
+                          onChange={e => setCvData({...cvData, personal_info: {...cvData.personal_info, full_name: e.target.value}})}
+                        />
+                      </div>
+                      <div>
+                        <label className="label">Email</label>
+                        <input type="email" className="input" value={cvData.personal_info.email}
+                          onChange={e => setCvData({...cvData, personal_info: {...cvData.personal_info, email: e.target.value}})}
+                        />
+                      </div>
+                      <div>
+                        <label className="label">Phone</label>
+                        <input type="text" className="input" value={cvData.personal_info.phone}
+                          onChange={e => setCvData({...cvData, personal_info: {...cvData.personal_info, phone: e.target.value}})}
+                        />
+                      </div>
+                    </div>
+                  </section>
+                )}
+
+                {step === 2 && (
+                  <section className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <h2 className="text-2xl font-bold">Professional Summary</h2>
+                      <button
+                        onClick={async () => {
+                          const enhanced = await handleAIEnhance("summary", cvData.summary || "Professional summary based on my experience");
+                          setCvData({...cvData, summary: enhanced});
+                        }}
+                        className="btn-secondary text-xs flex items-center gap-1"
+                      >
+                        <Wand2 size={14} /> AI Generate
+                      </button>
+                    </div>
+                    <textarea
+                      className="input min-h-[150px]"
+                      placeholder="Briefly describe your professional background and goals..."
+                      value={cvData.summary}
+                      onChange={e => setCvData({...cvData, summary: e.target.value})}
+                    ></textarea>
+                  </section>
+                )}
+
+                {step === 3 && (
+                  <section className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <h2 className="text-2xl font-bold">Work Experience</h2>
+                      <button
+                        onClick={() => setCvData({...cvData, work_experience: [...cvData.work_experience, {job_title: "", company: "", description: ""}]})}
+                        className="btn-primary text-xs flex items-center gap-1"
+                      >
+                        <Plus size={14} /> Add Role
+                      </button>
+                    </div>
+                    {cvData.work_experience.map((exp, idx) => (
+                      <div key={idx} className="p-4 border rounded-xl space-y-4 relative group">
+                        <button
+                          onClick={() => {
+                            const newExp = [...cvData.work_experience];
+                            newExp.splice(idx, 1);
+                            setCvData({...cvData, work_experience: newExp});
+                          }}
+                          className="absolute top-2 right-2 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                        <div className="grid grid-cols-2 gap-4">
+                          <input
+                            placeholder="Job Title" className="input"
+                            value={exp.job_title}
+                            onChange={e => {
+                              const newExp = [...cvData.work_experience];
+                              newExp[idx].job_title = e.target.value;
+                              setCvData({...cvData, work_experience: newExp});
+                            }}
+                          />
+                          <input
+                            placeholder="Company" className="input"
+                            value={exp.company}
+                            onChange={e => {
+                              const newExp = [...cvData.work_experience];
+                              newExp[idx].company = e.target.value;
+                              setCvData({...cvData, work_experience: newExp});
+                            }}
+                          />
+                          <div className="col-span-2 space-y-2">
+                            <div className="flex justify-between items-center">
+                              <label className="text-xs font-semibold">Description</label>
+                              <button
+                                onClick={async () => {
+                                  const enhanced = await handleAIEnhance("experience", exp.description);
+                                  const newExp = [...cvData.work_experience];
+                                  newExp[idx].description = enhanced;
+                                  setCvData({...cvData, work_experience: newExp});
+                                }}
+                                className="text-xs text-blue-600 flex items-center gap-1"
+                              >
+                                <Wand2 size={12} /> Enhance with AI
+                              </button>
+                            </div>
+                            <textarea
+                              className="input min-h-[100px]"
+                              value={exp.description}
+                              onChange={e => {
+                                const newExp = [...cvData.work_experience];
+                                newExp[idx].description = e.target.value;
+                                setCvData({...cvData, work_experience: newExp});
+                              }}
+                            ></textarea>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </section>
+                )}
+
+                {step === 4 && (
+                  <section className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <h2 className="text-2xl font-bold">Education</h2>
+                      <button
+                        onClick={() => setCvData({...cvData, education: [...cvData.education, {degree: "", institution: "", year: "", grade: ""}]})}
+                        className="btn-primary text-xs flex items-center gap-1"
+                      >
+                        <Plus size={14} /> Add Education
+                      </button>
+                    </div>
+                    {cvData.education.map((edu, idx) => (
+                      <div key={idx} className="p-4 border rounded-xl space-y-4 relative group">
+                        <button
+                          onClick={() => {
+                            const newEdu = [...cvData.education];
+                            newEdu.splice(idx, 1);
+                            setCvData({...cvData, education: newEdu});
+                          }}
+                          className="absolute top-2 right-2 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                        <div className="grid grid-cols-2 gap-4">
+                          <input
+                            placeholder="Degree" className="input"
+                            value={edu.degree}
+                            onChange={e => {
+                              const newEdu = [...cvData.education];
+                              newEdu[idx].degree = e.target.value;
+                              setCvData({...cvData, education: newEdu});
+                            }}
+                          />
+                          <input
+                            placeholder="Institution" className="input"
+                            value={edu.institution}
+                            onChange={e => {
+                              const newEdu = [...cvData.education];
+                              newEdu[idx].institution = e.target.value;
+                              setCvData({...cvData, education: newEdu});
+                            }}
+                          />
+                          <input
+                            placeholder="Year" className="input"
+                            value={edu.year}
+                            onChange={e => {
+                              const newEdu = [...cvData.education];
+                              newEdu[idx].year = e.target.value;
+                              setCvData({...cvData, education: newEdu});
+                            }}
+                          />
+                          <input
+                            placeholder="Grade / GPA" className="input"
+                            value={edu.grade}
+                            onChange={e => {
+                              const newEdu = [...cvData.education];
+                              newEdu[idx].grade = e.target.value;
+                              setCvData({...cvData, education: newEdu});
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </section>
+                )}
+
+                {step === 5 && (
+                  <section className="space-y-6">
+                    <h2 className="text-2xl font-bold">Skills</h2>
+                    {["technical", "soft", "languages"].map(cat => (
+                      <div key={cat} className="space-y-2">
+                        <label className="label capitalize">{cat} Skills</label>
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {cvData.skills[cat].map((s, i) => (
+                            <span key={i} className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm flex items-center gap-2">
+                              {s}
+                              <X size={14} className="cursor-pointer" onClick={() => {
+                                const newSkills = {...cvData.skills};
+                                newSkills[cat].splice(i, 1);
+                                setCvData({...cvData, skills: newSkills});
+                              }} />
+                            </span>
+                          ))}
+                        </div>
+                        <input
+                          placeholder={`Add ${cat} skill...`}
+                          className="input"
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              const val = e.target.value.trim();
+                              if (val) {
+                                const newSkills = {...cvData.skills};
+                                newSkills[cat].push(val);
+                                setCvData({...cvData, skills: newSkills});
+                                e.target.value = "";
+                              }
+                            }
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </section>
+                )}
+
+                {step === 6 && (
+                  <section className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <h2 className="text-2xl font-bold">Certifications & Awards</h2>
+                      <button
+                        onClick={() => setCvData({...cvData, certifications: [...cvData.certifications, {name: "", issuer: "", year: ""}]})}
+                        className="btn-primary text-xs flex items-center gap-1"
+                      >
+                        <Plus size={14} /> Add Item
+                      </button>
+                    </div>
+                    {cvData.certifications.map((cert, idx) => (
+                      <div key={idx} className="p-4 border rounded-xl space-y-4 relative group">
+                        <button
+                          onClick={() => {
+                            const newCert = [...cvData.certifications];
+                            newCert.splice(idx, 1);
+                            setCvData({...cvData, certifications: newCert});
+                          }}
+                          className="absolute top-2 right-2 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                        <div className="grid grid-cols-3 gap-4">
+                          <input
+                            placeholder="Name" className="input col-span-2"
+                            value={cert.name}
+                            onChange={e => {
+                              const newCert = [...cvData.certifications];
+                              newCert[idx].name = e.target.value;
+                              setCvData({...cvData, certifications: newCert});
+                            }}
+                          />
+                          <input
+                            placeholder="Year" className="input"
+                            value={cert.year}
+                            onChange={e => {
+                              const newCert = [...cvData.certifications];
+                              newCert[idx].year = e.target.value;
+                              setCvData({...cvData, certifications: newCert});
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </section>
+                )}
+
+                {step === 7 && (
+                  <section className="space-y-6">
+                    <h2 className="text-2xl font-bold">Select Template</h2>
+                    <div className="grid grid-cols-3 gap-6">
+                      {["Modern", "Classic", "ATS-Friendly"].map(t => (
+                        <div
+                          key={t}
+                          onClick={() => setCvData({...cvData, template_name: t})}
+                          className={`cursor-pointer border-2 rounded-xl p-4 text-center transition-all ${
+                            cvData.template_name === t ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-gray-300"
+                          }`}
+                        >
+                          <div className="bg-gray-200 aspect-[1/1.414] rounded mb-3"></div>
+                          <span className="font-semibold">{t}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                <div className="pt-8 flex justify-between border-t mt-12">
+                  <button onClick={prevStep} disabled={step === 1} className="btn-secondary flex items-center gap-2">
+                    <ChevronLeft size={18} /> Previous
+                  </button>
+                  <button onClick={nextStep} className="btn-primary flex items-center gap-2">
+                    {step === 7 ? "Finish" : "Next Step"} <ChevronRight size={18} />
                   </button>
                 </div>
-                <p className="text-slate-600 mb-6">
-                  Find jobs matching your CV from RemoteOK, Arbeitnow,
-                  Freelancer.com, and Adzuna
-                </p>
-                <JobList
-                  keywords={extractKeywordsFromCV(cvData)}
-                  jobTitles={extractJobTitlesFromCV(cvData)}
-                  location={null}
-                  limit={50}
-                  userId={user?.id}
-                />
-              </div>
-            </div>
-          )}
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </main>
 
-          {/* Main Tab Content */}
-          {/* Only show job match when Job Match button is clicked, don't blur other content */}
-          {!showJobMatch && renderTabContent()}
-
-          {/* Global Job Opportunities (only show when CV exists and not in job match mode) */}
-          {hasCV && !showJobMatch && activeTab !== "wizard" && (
-            <div className="mt-12">
-              <div className="card p-6">
-                <h2 className="text-2xl font-bold text-slate-900 mb-4 flex items-center gap-2">
-                  <Sparkles className="w-6 h-6 text-sky-600" />
-                  Global Job Opportunities
-                </h2>
-                <p className="text-slate-600 mb-6">
-                  Find jobs matching your CV from Adzuna, Jooble, Google Jobs,
-                  and remote job boards
-                </p>
-                <JobList
-                  keywords={extractKeywordsFromCV(cvData)}
-                  jobTitles={extractJobTitlesFromCV(cvData)}
-                  location={null}
-                  limit={50}
-                  userId={user?.id}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+        {/* Live Preview */}
+        <aside className="w-[400px] bg-gray-200 p-6 hidden lg:block overflow-y-auto">
+          <div className="sticky top-0 bg-white shadow-2xl rounded-sm aspect-[1/1.414] p-8 origin-top scale-90">
+             {/* Mock Live Preview Render */}
+             <div className="text-center border-b pb-4 mb-4">
+                <h1 className="text-xl font-bold uppercase tracking-widest">{cvData.personal_info.full_name || "Your Name"}</h1>
+                <p className="text-[10px] text-gray-500">{cvData.personal_info.email} | {cvData.personal_info.phone}</p>
+             </div>
+             <div className="space-y-4">
+                <section>
+                   <h2 className="text-xs font-bold border-b mb-1">SUMMARY</h2>
+                   <p className="text-[9px] text-gray-700 leading-relaxed">{cvData.summary}</p>
+                </section>
+                <section>
+                   <h2 className="text-xs font-bold border-b mb-1">EXPERIENCE</h2>
+                   {cvData.work_experience.map((e, i) => (
+                     <div key={i} className="mb-2">
+                        <div className="flex justify-between font-bold text-[9px]">
+                           <span>{e.job_title}</span>
+                           <span>{e.company}</span>
+                        </div>
+                        <p className="text-[8px] text-gray-600 mt-0.5">{e.description}</p>
+                     </div>
+                   ))}
+                </section>
+             </div>
+          </div>
+        </aside>
       </div>
     </div>
   );

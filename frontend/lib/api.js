@@ -75,6 +75,21 @@ export const paymentsAPI = {
 
 export default api;
 
+export const employerAPI = {
+  apply: (data) => api.post('/api/employers/apply', data),
+  getMe: () => api.get('/api/employers/me'),
+  shortlist: (cvId) => api.post(`/api/employers/shortlist/${cvId}`),
+  getShortlisted: () => api.get('/api/employers/shortlisted'),
+};
+
+export const adminAPI = {
+  getStats: () => api.get('/api/admin/stats'),
+  listEmployers: () => api.get('/api/admin/employers'),
+  approveEmployer: (id) => api.patch(`/api/admin/employers/${id}/approve`),
+  rejectEmployer: (id, reason) => api.patch(`/api/admin/employers/${id}/reject`, { reason }),
+  listUsers: () => api.get('/api/admin/users'),
+};
+
 export const jobAPI = {
   create: (data) => api.post('/api/jobs/create', data),
   getAll: (skip = 0, limit = 100) => api.get(`/api/jobs?skip=${skip}&limit=${limit}`),
@@ -121,6 +136,15 @@ export const cvAPI = {
       'Content-Type': 'multipart/form-data',
     },
   }),
+  // Feature 1 endpoints
+  getMe: () => api.get('/api/cv/me'),
+  save: (data) => api.post('/api/cv/save', data),
+  exportPDF: (data) => api.post('/api/cv/export-pdf', data, { responseType: 'blob' }),
+  uploadParse: (formData) => api.post('/api/cv/upload-parse', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  aiEnhance: (data) => api.post('/api/cv/ai-enhance', data),
+  search: (data) => api.post('/api/cv/search', data),
   // New endpoints
   getSuggestions: (section, content, industry = null) => 
     api.post('/api/cv/suggestions', { section, content, industry }),
