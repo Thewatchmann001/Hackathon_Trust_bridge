@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import Logo from "./Logo";
 
-const ROLE_LABELS = { student: "Job seeker", founder: "Founder", investor: "Investor" };
+const ROLE_LABELS = { student: "Job seeker", founder: "Founder", investor: "Investor", employer: "Employer", admin: "Admin" };
 
 export default function Layout({ children }) {
   const { user, logout, isAuthenticated, activeRole, capabilities, switchRole } = useAuth();
@@ -24,24 +24,31 @@ export default function Layout({ children }) {
 
     const links = [];
     const canJobSeeker = capabilities?.job_seeker !== false || role === "student" || role === "job_seeker";
-    const canInvestor = capabilities?.investor !== false || role === "investor";
-    const canFounder = capabilities?.founder === true || role === "founder" || role === "startup";
+    // const canInvestor = capabilities?.investor !== false || role === "investor";
+    // const canFounder = capabilities?.founder === true || role === "founder" || role === "startup";
 
     if (canJobSeeker) {
       links.push({ href: "/cv-builder", label: "CV Builder", icon: GraduationCap });
     }
-    if (canInvestor) {
-      links.push({ href: "/investor-platform", label: "Investments", icon: Briefcase });
+
+    // Feature 2 & 3: Employer Links
+    if (role === "employer") {
+      links.push({ href: "/employer-dashboard", label: "Dashboard", icon: LayoutIcon });
+    } else {
+      links.push({ href: "/employer-register", label: "For Employers", icon: Building2 });
     }
-    if (canFounder) {
-      links.push({ href: "/startup-dashboard", label: "My Startup", icon: Building2 });
+
+    // Feature 4: Admin Dashboard
+    const ADMIN_EMAILS = ["josephemsamah@gmail.com"];
+    if (role === "admin" || (user?.email && ADMIN_EMAILS.includes(user.email))) {
+      links.push({ href: "/admin-dashboard", label: "Admin", icon: Shield });
     }
 
     return links;
   };
 
   const navLinks = getNavLinks();
-  const showRoleSwitcher = Array.isArray(allowedRoles) && allowedRoles.length > 1;
+  const showRoleSwitcher = false; // Array.isArray(allowedRoles) && allowedRoles.length > 1;
 
   const handleRoleSwitch = async (newRole) => {
     const result = await switchRole(newRole);

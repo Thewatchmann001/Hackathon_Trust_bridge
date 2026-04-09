@@ -18,6 +18,9 @@ from app.api import messages  # Chat/messaging API
 from app.api import auth  # OAuth authentication
 from app.api.payments import router as payments_router
 from app.api.escrow import router as escrow_router
+from app.api.cv import router as cv_router
+from app.api.employers import router as employers_router
+from app.api.admin import router as admin_router
 from app.api.websocket import manager
 from app.core.exceptions import InvalidCredentials, UserNotFound, TrustBridgeException
 from app.core.middleware import RateLimitMiddleware, CSRFProtectionMiddleware
@@ -62,6 +65,9 @@ app.include_router(auth.router)  # OAuth authentication (Google, etc.)
 app.include_router(messages.router)  # Chat/messaging
 app.include_router(payments_router)
 app.include_router(escrow_router)
+app.include_router(cv_router)
+app.include_router(employers_router)
+app.include_router(admin_router)
 app.include_router(main_router)  # New consolidated routes for CV and Investments
 
 # Mount static files for photo uploads

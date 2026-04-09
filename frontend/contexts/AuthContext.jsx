@@ -77,7 +77,7 @@ export const AuthProvider = ({ children }) => {
 
           // Get role from localStorage (set before Privy login) or default
           // Note: Backend will enforce role matching - existing user's role is authoritative
-          let role = 'investor'; // Default
+          let role = 'student'; // Default
           if (typeof window !== 'undefined') {
             const pendingRole = localStorage.getItem(PENDING_ROLE_STORAGE_KEY);
             if (pendingRole) {

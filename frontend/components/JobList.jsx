@@ -7,8 +7,8 @@
  * Only fetches if no jobs in context (fallback for direct navigation)
  */
 import { useState, useEffect } from 'react';
-import { Briefcase, MapPin, Building2, ExternalLink, Loader, Search, Sparkles, AlertCircle } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Briefcase, MapPin, Building2, ExternalLink, Loader, Search, Sparkles, AlertCircle, ChevronDown, ChevronUp, CheckCircle2, Info } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { cvAPI } from '../lib/api';
 import toast from 'react-hot-toast';
 import { useJobs } from '../contexts/JobsContext';
@@ -22,6 +22,7 @@ export default function JobList({ keywords = [], jobTitles = [], location = null
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [searchLocation, setSearchLocation] = useState(location || '');
+  const [expandedJobId, setExpandedJobId] = useState(null);
   
   // Use context jobs if available, otherwise use local
   const displayJobs = matchedJobs.length > 0 ? matchedJobs : jobs;
@@ -233,16 +234,43 @@ export default function JobList({ keywords = [], jobTitles = [], location = null
             const jobKey = `${job.title || job.job_title || ''}-${job.company || job.company_name || ''}-${index}`;
             const applyUrl = job.applyUrl || job.url || job.link || job.apply_url;
             
+            const matchScore = formatMatchScore(job.match_score);
+            const isExpanded = expandedJobId === jobKey;
+
             return (
               <motion.div
                 key={jobKey}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.05 }}
-                className="bg-white/70 backdrop-blur-sm rounded-xl shadow-md p-6 hover:shadow-lg transition-shadow duration-200 border border-gray-200"
+                className={`bg-white/70 backdrop-blur-sm rounded-xl shadow-md p-6 hover:shadow-lg transition-shadow duration-200 border relative overflow-hidden ${
+                  job.is_fallback ? 'border-amber-200' : 'border-gray-200'
+                }`}
               >
+                {/* Fallback Indicator */}
+                {job.is_fallback && (
+                  <div className="absolute top-0 left-0 right-0 bg-amber-100 text-amber-800 text-[10px] uppercase tracking-wider font-bold py-1 px-3 flex items-center gap-1">
+                    <Info className="w-3 h-3" />
+                    Relevant Match (Based on Industry)
+                  </div>
+                )}
+
+                {/* Match Score Badge */}
+                {matchScore !== null && (
+                  <div className="absolute top-4 right-4 flex flex-col items-end">
+                    <div className={`text-lg font-bold ${
+                      matchScore >= 70 ? 'text-green-600' :
+                      matchScore >= 40 ? 'text-yellow-600' :
+                      'text-red-600'
+                    }`}>
+                      {matchScore}%
+                    </div>
+                    <div className="text-[10px] text-gray-400 font-medium uppercase">Match</div>
+                  </div>
+                )}
+
                 {/* Job Title */}
-                <h3 className="text-xl font-bold text-gray-900 mb-2 line-clamp-2">
+                <h3 className={`text-xl font-bold text-gray-900 mb-2 line-clamp-2 ${job.is_fallback ? 'mt-4' : ''}`}>
                   {job.title || job.job_title || 'Job Title'}
                 </h3>
 
@@ -258,12 +286,17 @@ export default function JobList({ keywords = [], jobTitles = [], location = null
                   <span className="text-gray-600 text-sm">{job.location || 'Location not specified'}</span>
                 </div>
 
-                {/* Source Badge */}
-                {job.source && (
-                  <div className="mb-3">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-sky-100 text-sky-800">
-                      {job.source}
-                    </span>
+                {/* Match Reasons */}
+                {job.match_reasons && job.match_reasons.length > 0 && (
+                  <div className="mb-4">
+                    <div className="flex flex-wrap gap-2">
+                      {job.match_reasons.map((reason, idx) => (
+                        <div key={idx} className="flex items-center gap-1 text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded-md border border-blue-100">
+                          <Sparkles className="w-3 h-3" />
+                          {reason}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -391,6 +424,81 @@ export default function JobList({ keywords = [], jobTitles = [], location = null
                 <p className="text-gray-600 text-sm mb-4 line-clamp-3">
                   {job.description || job.summary || 'No description available'}
                 </p>
+
+                {/* Detailed Feedback Expandable */}
+                {job.detailed_feedback && (
+                  <div className="mb-4">
+                    <button
+                      onClick={() => setExpandedJobId(isExpanded ? null : jobKey)}
+                      className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 transition-colors"
+                    >
+                      {isExpanded ? (
+                        <>
+                          <ChevronUp className="w-4 h-4" />
+                          Hide Match Details
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="w-4 h-4" />
+                          View Match Details
+                        </>
+                      )}
+                    </button>
+
+                    <AnimatePresence>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="mt-3 p-4 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
+                            {job.detailed_feedback.summary && (
+                              <div>
+                                <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Analysis</h4>
+                                <p className="text-sm text-gray-600 italic">"{job.detailed_feedback.summary}"</p>
+                              </div>
+                            )}
+
+                            {job.detailed_feedback.strengths && job.detailed_feedback.strengths.length > 0 && (
+                              <div>
+                                <h4 className="text-xs font-bold text-green-700 uppercase tracking-wider mb-1 flex items-center gap-1">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  Strengths
+                                </h4>
+                                <ul className="list-disc list-inside text-xs text-gray-600 space-y-0.5 ml-1">
+                                  {job.detailed_feedback.strengths.map((strength, idx) => (
+                                    <li key={idx}>{strength}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {job.detailed_feedback.improvement_areas && job.detailed_feedback.improvement_areas.length > 0 && (
+                              <div>
+                                <h4 className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-1 flex items-center gap-1">
+                                  <AlertCircle className="w-3 h-3" />
+                                  How to Improve
+                                </h4>
+                                <div className="space-y-2">
+                                  {job.detailed_feedback.improvement_areas.map((area, idx) => (
+                                    <div key={idx} className="bg-white p-2 rounded border border-amber-100">
+                                      <p className="text-xs font-semibold text-gray-800">{area.area}</p>
+                                      <p className="text-[11px] text-gray-600 mb-1">{area.issue}</p>
+                                      <p className="text-[11px] text-blue-600 font-medium">💡 {area.suggestion}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
 
                 {/* Apply Button */}
                 {applyUrl ? (

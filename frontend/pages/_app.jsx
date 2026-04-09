@@ -151,7 +151,7 @@ function MyApp({ Component, pageProps }) {
         <title>TrustBridge - Professional Career & Investment Platform</title>
         <meta
           name="description"
-          content="AI-Powered CV Builder, Global Job Matching & Diaspora Investment Platform"
+          content="AI-Powered CV Builder & Global Job Matching Platform"
         />
         <link rel="manifest" href="/manifest.json" />
 
@@ -184,7 +184,7 @@ function MyApp({ Component, pageProps }) {
         />
         <meta
           property="og:description"
-          content="AI-Powered CV Builder, Global Job Matching & Diaspora Investment Platform"
+          content="AI-Powered CV Builder & Global Job Matching Platform"
         />
         <meta property="og:site_name" content="TrustBridge" />
 
@@ -193,7 +193,7 @@ function MyApp({ Component, pageProps }) {
         <meta name="twitter:title" content="TrustBridge" />
         <meta
           name="twitter:description"
-          content="AI-Powered CV Builder, Global Job Matching & Diaspora Investment Platform"
+          content="AI-Powered CV Builder & Global Job Matching Platform"
         />
 
         {/* Favicon */}

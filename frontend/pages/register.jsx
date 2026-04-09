@@ -343,50 +343,8 @@ export default function Register() {
             </motion.div>
           )}
 
-          {/* Role selection - DISABLED when authenticated to prevent role switching */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.5 }}
-            className="mb-4"
-          >
-            <label className="block text-sm font-bold text-blue-900 mb-2">
-              I am a...
-            </label>
-            <select
-              value={formData.role}
-              onChange={(e) => {
-                setFormData({ ...formData, role: e.target.value });
-                // Clear error when user selects a new role
-                if (authError) {
-                  clearAuthError();
-                  setSyncFailed(false);
-                }
-              }}
-              className="input-field"
-              required
-              disabled={privyAuth?.authenticated && !authError}
-            >
-              <option value="student">Job Seeker</option>
-              <option value="founder">Startup</option>
-              <option value="investor">Investor</option>
-            </select>
-            {privyAuth?.authenticated && !authError && (
-              <p className="text-xs text-amber-600 mt-1 font-medium">
-                ⚠️ You are already signed in. Please logout to change your role.
-              </p>
-            )}
-            {!privyAuth?.authenticated && !authError && (
-              <p className="text-xs text-gray-500 mt-1">
-                Select your role. This role cannot be changed after registration.
-              </p>
-            )}
-            {authError && (
-              <p className="text-xs text-red-700 mt-1 font-medium">
-                ✓ You have been logged out. Select the correct role above and sign in again.
-              </p>
-            )}
-          </motion.div>
+          {/* Role selection - HIDDEN: Only Job Seeker allowed for now */}
+          <input type="hidden" name="role" value="student" />
 
           {/* Traditional registration form – only when Privy is NOT enabled */}
           {!PRIVY_ENABLED && (

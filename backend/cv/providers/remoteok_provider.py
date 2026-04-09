@@ -90,6 +90,7 @@ class RemoteOKProvider(BaseJobProvider):
     def normalize_job(self, raw_job: Dict[str, Any]) -> Optional[JobSchema]:
         """Normalize RemoteOK job to JobSchema."""
         try:
+            from datetime import timezone
             # Extract skills from tags and description
             tags = raw_job.get('tags', [])
             description = raw_job.get('description', '')
@@ -99,8 +100,10 @@ class RemoteOKProvider(BaseJobProvider):
             date_str = raw_job.get('date', '')
             try:
                 job_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                if job_date.tzinfo is None:
+                    job_date = job_date.replace(tzinfo=timezone.utc)
             except:
-                job_date = datetime.now()
+                job_date = datetime.now(timezone.utc)
             
             # Generate unique ID
             job_id = f"remoteok_{raw_job.get('id', '')}_{raw_job.get('position', '').lower().replace(' ', '_')}"
